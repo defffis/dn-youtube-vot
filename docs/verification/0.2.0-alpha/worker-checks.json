@@ -1,0 +1,16 @@
+{
+  "transport": "X-VOT-Headers / binary body",
+  "checks": [
+    {
+      "server": "https://vot-worker.eu.cc",
+      "endpoint": "/session/create",
+      "http_status": 405
+    },
+    {
+      "server": "https://vot-worker.toil.cc",
+      "endpoint": "/session/create",
+      "http_status": 503
+    }
+  ],
+  "working_worker_confirmed": false
+}

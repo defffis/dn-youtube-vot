@@ -72,14 +72,16 @@ inline Bytes session(const std::string &uuid) {
 }
 inline Bytes translation(const std::string &url, double duration, const std::string &from,
                          const std::string &to, bool first, bool forceLanguage,
-                         const std::string &audioURL = "") {
+                         const std::string &audioURL = "", bool lively = false) {
     Bytes b; string(b, 3, url); if (first) integer(b, 5, 1); number(b, 6, duration);
     integer(b, 7, 1); string(b, 8, from); if (forceLanguage) integer(b, 9, 1);
     if (!audioURL.empty()) {
         Bytes help; string(help, 1, "video_file_url"); string(help, 2, audioURL);
         blob(b, 11, help.data(), help.size());
     }
-    string(b, 14, to); integer(b, 15, 1); integer(b, 16, 2); return b;
+    string(b, 14, to); integer(b, 15, 1); integer(b, 16, 2);
+    if (lively) integer(b, 18, 1);
+    return b;
 }
 inline Bytes audio(const std::string &translationID, const std::string &url,
                    const std::string &fileID, const uint8_t *p, size_t n) {

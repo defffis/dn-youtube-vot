@@ -8,6 +8,7 @@
 @property(nonatomic,copy) void (^failed)(NSString *);
 - (void)startVideo:(NSString *)videoID duration:(double)duration from:(NSString *)from to:(NSString *)to sourceAudio:(NSURL *)audioURL itag:(NSInteger)itag;
 - (void)cancel;
+- (NSString *)diagnostics;
 @end
 
 @interface DNVOTController : NSObject
@@ -32,8 +33,15 @@
 - (void)tick;
 - (void)saveSettings;
 - (void)showPanel;
+- (void)showPanelFrom:(UIViewController *)presenter;
+- (void)toggleTranslation;
+- (void)updateControlsButton:(UIButton *)button;
 - (NSString *)diagnostics;
 @end
 
 void DNVOTInstallHooks(void);
 NSString *DNVOTBootstrapDiagnostics(void);
+BOOL DNVOTHook(Class cls, NSString *name, char result, const char *args, id (^factory)(IMP, SEL));
+void DNVOTInstallNativeUI(void);
+void DNVOTUpdateNativeButtons(void);
+NSString *DNVOTNativeDiagnostics(void);

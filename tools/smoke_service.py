@@ -35,6 +35,7 @@ sign=lambda data:hmac.new(KEY,data,hashlib.sha256).hexdigest()
 def main():
     p=argparse.ArgumentParser()
     p.add_argument('--url');p.add_argument('--source-url',default='');p.add_argument('--video',default='jNQXAC9IVRw');p.add_argument('--duration',type=float,default=19)
+    p.add_argument('--host',default=HOST);p.add_argument('--transport',choices=['direct','worker'],default='direct')
     p.add_argument('--wait',type=int,default=0,help='seconds to wait/poll; 0 means one request')
     p.add_argument('--fallback',action='store_true',help='request server-side audio retrieval if status=6')
     p.add_argument('--output',type=Path,default=Path('build/service-smoke.json'))
@@ -48,7 +49,8 @@ def main():
         if secured:
             token=uid+':'+path+':'+COMPONENT
             headers['Sec-Vtrans-Sk']=secret;headers['Sec-Vtrans-Token']=sign(token.encode())+':'+token
-        req=urllib.request.Request(HOST+path,data=body,headers=headers,method=method)
+        if args.transport=='worker':headers={'X-VOT-Headers':base64.b64encode(json.dumps(headers,separators=(',',':')).encode()).decode(),'User-Agent':'vot.js/3.2.0','Content-Type':'application/json' if json_body else 'application/x-protobuf'}
+        req=urllib.request.Request(args.host.rstrip('/')+path,data=body,headers=headers,method=method)
         try:
             with urllib.request.urlopen(req,timeout=40) as response:
                 result=response.read(2*1024*1024);code=response.status
@@ -82,7 +84,7 @@ def main():
             events.append({'audio_submission_status':uploaded.get(1)})
         if state not in (2,3,5,6) or time.monotonic()>=deadline:break
         time.sleep(min(15,max(3,deadline-time.monotonic())))
-    report={'engine':'Yandex VOT','video_id':None if args.url else args.video,'input_kind':'custom_video_url' if args.url else 'youtube','video_url':args.url if args.url else 'https://youtu.be/'+args.video,'time_utc':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()),'events':events,'translated_audio_received':bool(result.get(1)),'ios_runtime_tested':False}
+    report={'transport':args.transport,'server':args.host,'engine':'Yandex VOT','video_id':None if args.url else args.video,'input_kind':'custom_video_url' if args.url else 'youtube','video_url':args.url if args.url else 'https://youtu.be/'+args.video,'time_utc':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()),'events':events,'translated_audio_received':bool(result.get(1)),'ios_runtime_tested':False}
     args.output.parent.mkdir(parents=True,exist_ok=True);args.output.write_text(json.dumps(report,indent=2)+'\n')
     print('Saved',args.output,flush=True)
 if __name__=='__main__':main()

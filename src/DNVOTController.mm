@@ -1,6 +1,8 @@
 #import "DNVOT.h"
 #import "Runtime.hpp"
+#import "Preferences.h"
 #include "SyncPolicy.hpp"
+#include "ControlState.hpp"
 #include <algorithm>
 
 static NSString *const DNSettings = @"DNVoiceTranslation.v1";
@@ -11,7 +13,7 @@ static NSString *const DNUpdate = @"DNVoiceTranslationUpdated";
 @interface DNVOTController ()
 @property(nonatomic,strong) DNVOTClient *client;
 @property(nonatomic,strong) AVPlayer *audio;
-@property(nonatomic,strong) UIButton *button;
+@property(nonatomic) NSTimeInterval requestStarted;
 @property(nonatomic,strong) NSTimer *timer;
 @property(nonatomic,strong) NSCache<NSString *, NSURL *> *cache;
 @property(nonatomic,copy) NSString *activeKey;
@@ -87,11 +89,27 @@ static NSString *const DNUpdate = @"DNVoiceTranslationUpdated";
     if (self.audio) self.audio.volume = self.translationLevel;
     [self applyDucking:self.ducking];
 }
-- (void)updateButton {
-    if (!self.button) return;
-    NSString *title = self.enabled ? (self.working ? @"Перевод…" : @"Перевод ✓") : @"Перевод";
-    [self.button setTitle:title forState:UIControlStateNormal];
-    self.button.accessibilityValue = self.statusText;
+- (void)updateButton { DNVOTUpdateNativeButtons(); }
+- (void)toggleTranslation { if (self.enabled) [self stop]; else [self start]; }
+- (void)updateControlsButton:(UIButton *)button {
+    BOOL ready = self.enabled && self.audio.currentItem.status == AVPlayerItemStatusReadyToPlay && self.audio;
+    auto state = dnvot::controlState(self.enabled, ready, self.requestStarted, NSProcessInfo.processInfo.systemUptime);
+    BOOL waiting = state.phase == dnvot::ControlPhase::waiting;
+    NSString *title = nil;
+    if (waiting) {
+        NSUInteger elapsed = state.elapsed;
+        title = [NSString stringWithFormat:@"%lu:%02lu", (unsigned long)(elapsed/60), (unsigned long)(elapsed%60)];
+    }
+    if (![[button titleForState:UIControlStateNormal] isEqualToString:title]) [button setTitle:title forState:UIControlStateNormal];
+    UIImage *icon = waiting ? nil : [UIImage systemImageNamed:ready ? @"waveform.bubble.fill" : @"waveform.bubble"];
+    [button setImage:icon forState:UIControlStateNormal];
+    button.tintColor = ready ? UIColor.systemGreenColor : UIColor.whiteColor;
+    [button setTitleColor:button.tintColor forState:UIControlStateNormal];
+    button.accessibilityLabel = waiting ? @"Отменить подготовку перевода" : (ready ? @"Выключить перевод" : @"Включить перевод");
+    button.accessibilityHint = @"Удерживайте для настроек озвучки и громкости";
+    button.accessibilityValue = self.statusText;
+    button.enabled = self.videoID.length > 0;
+    button.hidden = !self.videoID.length;
 }
 - (NSString *)currentID {
     NSString *videoID = DNString(DNObject(self.player, @"contentVideoID"));
@@ -112,31 +130,7 @@ static NSString *const DNUpdate = @"DNVoiceTranslationUpdated";
     }
     [self mountButton];
 }
-- (void)mountButton {
-    UIViewController *vc = [self.player isKindOfClass:UIViewController.class] ? self.player : nil;
-    if (!vc.isViewLoaded || !vc.view.window) return;
-    UIView *host = vc.view;
-    if (!self.button) {
-        self.button = [UIButton buttonWithType:UIButtonTypeSystem];
-        self.button.translatesAutoresizingMaskIntoConstraints = NO;
-        self.button.backgroundColor = [UIColor.blackColor colorWithAlphaComponent:0.72];
-        self.button.tintColor = UIColor.whiteColor; self.button.layer.cornerRadius = 18;
-        self.button.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
-        self.button.accessibilityLabel = @"Озвучка видео с переводом";
-        [self.button addTarget:self action:@selector(showPanel) forControlEvents:UIControlEventTouchUpInside];
-    }
-    if (self.button.superview != host) {
-        [self.button removeFromSuperview]; [host addSubview:self.button];
-        [NSLayoutConstraint activateConstraints:@[
-            [self.button.leadingAnchor constraintEqualToAnchor:host.safeAreaLayoutGuide.leadingAnchor constant:12],
-            [self.button.topAnchor constraintEqualToAnchor:host.safeAreaLayoutGuide.topAnchor constant:48],
-            [self.button.widthAnchor constraintEqualToConstant:112], [self.button.heightAnchor constraintEqualToConstant:38]
-        ]];
-    }
-    [host bringSubviewToFront:self.button];
-    self.button.hidden = !self.videoID.length || CGRectGetWidth(host.bounds) < 200 || CGRectGetHeight(host.bounds) < 130;
-    [self updateButton];
-}
+- (void)mountButton { DNVOTUpdateNativeButtons(); }
 - (void)playerPaused:(id)player {
     if (self.player != player) return;
     self.userPaused = YES; self.pausedAt = NSProcessInfo.processInfo.systemUptime; [self.audio pause]; [self applyDucking:NO];
@@ -166,13 +160,13 @@ static NSString *const DNUpdate = @"DNVoiceTranslationUpdated";
     self.capturedVolume = NO; self.seeking = NO; self.activeKey = nil;
     self.statusText = @"Перевод выключен";
 }
-- (NSString *)cacheKey { return [NSString stringWithFormat:@"%@|%@|%@", self.videoID, self.fromLanguage, self.toLanguage]; }
+- (NSString *)cacheKey { return [NSString stringWithFormat:@"%@|%@|%@|%@", self.videoID, self.fromLanguage, self.toLanguage, DNVOTPreferences.shared.configurationKey]; }
 - (NSURL *)sourceAudioWithItag:(NSInteger *)itag {
     id active = DNObject(self.player, @"activeVideo");
     id format = DNObject(active, @"selectedAudioFormat");
     id raw = DNObject(format, @"URL");
     NSURL *url = [raw isKindOfClass:NSURL.class] ? raw : [NSURL URLWithString:DNString(raw) ?: @""];
-    if (url && DNNumber(format, @"DRMFamily") == 0 && [url.host.lowercaseString hasSuffix:@".googlevideo.com"]) {
+    if (url && [url.scheme.lowercaseString isEqual:@"https"] && DNNumber(format, @"DRMFamily", -1) == 0 && [url.host.lowercaseString hasSuffix:@".googlevideo.com"]) {
         *itag = (NSInteger)DNNumber(format, @"itag", 140); return url;
     }
     return nil;
@@ -191,6 +185,7 @@ static NSString *const DNUpdate = @"DNVoiceTranslationUpdated";
         self.statusText = @"Выберите разные языки оригинала и перевода"; return;
     }
     [self stop]; self.videoID = videoID; self.enabled = YES; self.working = YES;
+    self.requestStarted = NSProcessInfo.processInfo.systemUptime;
     self.activeKey = [self cacheKey];
     self.savedVolume = (float)DNNumber(self.player, @"volume", 1); self.capturedVolume = YES;
     NSURL *cached = [self.cache objectForKey:self.activeKey];
@@ -211,7 +206,7 @@ static NSString *const DNUpdate = @"DNVoiceTranslationUpdated";
     id player = self.player;
     if (!player) {
         if (self.enabled) [self stop];
-        [self.button removeFromSuperview]; return;
+        DNVOTUpdateNativeButtons(); return;
     }
     NSString *videoID = [self currentID];
     if (![self.videoID isEqualToString:videoID]) {
@@ -222,7 +217,7 @@ static NSString *const DNUpdate = @"DNVoiceTranslationUpdated";
             dispatch_async(dispatch_get_main_queue(), ^{ if (generation == self.generation && [self.videoID isEqualToString:videoID]) [self start]; });
         }
     }
-    if (self.tickCount++ % 5 == 0) [self mountButton];
+    self.tickCount++; [self mountButton];
     if (!self.enabled || !self.audio) return;
     AVPlayerItem *item = self.audio.currentItem;
     if (item.status == AVPlayerItemStatusFailed) {
@@ -268,7 +263,11 @@ static NSString *const DNUpdate = @"DNVoiceTranslationUpdated";
         [self.audio pause]; self.lastAdvance = -100; [self applyDucking:NO];
     }
 }
-- (void)showPanel {
+- (void)showPanel { [self showPanelFrom:nil]; }
+- (void)showPanelFrom:(UIViewController *)presenter {
+    if (presenter.navigationController) {
+        [presenter.navigationController pushViewController:[DNVOTPanel new] animated:YES]; return;
+    }
     UIViewController *vc = [self.player isKindOfClass:UIViewController.class] ? self.player : nil;
     if (!vc.isViewLoaded || !vc.view.window) {
         for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
@@ -288,8 +287,8 @@ static NSString *const DNUpdate = @"DNVoiceTranslationUpdated";
 }
 - (NSString *)diagnostics {
     id active = DNObject(self.player, @"activeVideo");
-    NSString *engine = [NSString stringWithFormat:@"DN YouTube Voice Translation 0.1.1-alpha\nYouTube: %@\niOS: %@\nPlayer: %@\nVideo: %@\nEnabled: %@\nStatus: %@\nPlayer state: %.0f\nContent time: %.3f\nRate: %.3f\nAudio state: %ld\nAudio time: %.3f\nAd: %.0f\nExternal playback: %.0f\nPartial translation: %@\nEngine: Yandex VOT / %@", [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"], UIDevice.currentDevice.systemVersion, NSStringFromClass([self.player class]), self.videoID ?: @"—", self.enabled ? @"YES" : @"NO", self.statusText, DNNumber(self.player, @"playerState", -1), DNNumber(self.player, @"contentVideoMediaTime", -1), DNNumber(DNObject(self.player, @"activePlaybackRateModel"), @"activeRate", -1), (long)self.audio.timeControlStatus, self.audio ? CMTimeGetSeconds(self.audio.currentTime) : 0, DNNumber(self.player, @"isPlayingAd"), DNNumber(active, @"isExternalPlaybackActive"), self.partial ? @"YES" : @"NO", @"26.10.0.1796"];
-    return [engine stringByAppendingFormat:@"\n%@", DNVOTBootstrapDiagnostics()];
+    NSString *engine = [NSString stringWithFormat:@"DN YouTube Voice Translation 0.2.0-alpha\nYouTube: %@\niOS: %@\nPlayer: %@\nVideo: %@\nEnabled: %@\nStatus: %@\nPlayer state: %.0f\nContent time: %.3f\nRate: %.3f\nAudio state: %ld\nAudio time: %.3f\nAd: %.0f\nExternal playback: %.0f\nPartial translation: %@\nEngine: Yandex VOT / %@", [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"], UIDevice.currentDevice.systemVersion, NSStringFromClass([self.player class]), self.videoID ?: @"—", self.enabled ? @"YES" : @"NO", self.statusText, DNNumber(self.player, @"playerState", -1), DNNumber(self.player, @"contentVideoMediaTime", -1), DNNumber(DNObject(self.player, @"activePlaybackRateModel"), @"activeRate", -1), (long)self.audio.timeControlStatus, self.audio ? CMTimeGetSeconds(self.audio.currentTime) : 0, DNNumber(self.player, @"isPlayingAd"), DNNumber(active, @"isExternalPlaybackActive"), self.partial ? @"YES" : @"NO", @"26.10.0.1796"];
+    return [engine stringByAppendingFormat:@"\n%@\n%@\n%@", DNVOTBootstrapDiagnostics(), DNVOTNativeDiagnostics(), [self.client diagnostics]];
 }
 @end
 
@@ -342,6 +341,14 @@ static NSString *const DNUpdate = @"DNVoiceTranslationUpdated";
     ]];
     self.statusLabel = [self label:@"" detail:YES]; self.statusLabel.accessibilityTraits |= UIAccessibilityTraitUpdatesFrequently;
     [self.stack addArrangedSubview:self.statusLabel];
+    UIButton *account = [UIButton buttonWithType:UIButtonTypeSystem];
+    [account setTitle:@"Аккаунт Яндекса и живые голоса" forState:UIControlStateNormal];
+    [account addTarget:self action:@selector(openAccount) forControlEvents:UIControlEventTouchUpInside];
+    [self.stack addArrangedSubview:account];
+    UIButton *server = [UIButton buttonWithType:UIButtonTypeSystem];
+    [server setTitle:@"Сервер перевода" forState:UIControlStateNormal];
+    [server addTarget:self action:@selector(openServer) forControlEvents:UIControlEventTouchUpInside];
+    [self.stack addArrangedSubview:server];
     [self.stack addArrangedSubview:[self label:@"Язык оригинала" detail:NO]]; [self.stack addArrangedSubview:[self languageButton:YES]];
     [self.stack addArrangedSubview:[self label:@"Перевести на" detail:NO]]; [self.stack addArrangedSubview:[self languageButton:NO]];
     DNVOTController *c = DNVOTController.shared;
@@ -360,13 +367,13 @@ static NSString *const DNUpdate = @"DNVoiceTranslationUpdated";
     [autoRow addArrangedSubview:[self label:@"Переводить следующие видео" detail:NO]];
     UISwitch *autoSwitch = [UISwitch new]; autoSwitch.on = c.autoTranslate;
     [autoSwitch addTarget:self action:@selector(autoChanged:) forControlEvents:UIControlEventValueChanged]; [autoRow addArrangedSubview:autoSwitch]; [self.stack addArrangedSubview:autoRow];
-    [self.stack addArrangedSubview:[self label:@"Для перевода ссылка на ролик, а при необходимости его аудио передаются Яндексу. Используется стандартная озвучка VOT; качество и доступность зависят от сервиса." detail:YES]];
+    [self.stack addArrangedSubview:[self label:@"Для перевода ссылка на ролик, а при необходимости его аудио передаются Яндексу. Сервер, аккаунт и тип голоса выбираются в настройках VOT. Качество и доступность зависят от сервиса." detail:YES]];
     self.action = [UIButton buttonWithType:UIButtonTypeSystem]; self.action.titleLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];
     [self.action.heightAnchor constraintGreaterThanOrEqualToConstant:46].active = YES;
     [self.action addTarget:self action:@selector(toggle) forControlEvents:UIControlEventTouchUpInside]; [self.stack addArrangedSubview:self.action];
     UIButton *diagnostics = [UIButton buttonWithType:UIButtonTypeSystem]; [diagnostics setTitle:@"Скопировать диагностику" forState:UIControlStateNormal];
     [diagnostics addTarget:self action:@selector(copyDiagnostics) forControlEvents:UIControlEventTouchUpInside]; [self.stack addArrangedSubview:diagnostics];
-    [self.stack addArrangedSubview:[self label:@"0.1.1-alpha · Диагностическая сборка · Проверка на устройстве ещё требуется" detail:YES]];
+    [self.stack addArrangedSubview:[self label:@"0.2.0-alpha · Диагностическая сборка · Проверка на устройстве ещё требуется" detail:YES]];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(refresh) name:DNUpdate object:nil]; [self refresh];
 }
 - (void)dealloc { [NSNotificationCenter.defaultCenter removeObserver:self]; }
@@ -384,5 +391,7 @@ static NSString *const DNUpdate = @"DNVoiceTranslationUpdated";
 - (void)autoChanged:(UISwitch *)toggle { DNVOTController.shared.autoTranslate = toggle.on; [DNVOTController.shared saveSettings]; }
 - (void)toggle { if (DNVOTController.shared.enabled) [DNVOTController.shared stop]; else [DNVOTController.shared start]; [self refresh]; }
 - (void)copyDiagnostics { UIPasteboard.generalPasteboard.string = [DNVOTController.shared diagnostics]; }
-- (void)close { [self dismissViewControllerAnimated:YES completion:nil]; }
+- (void)openAccount { [self.navigationController pushViewController:[DNVOTAccountSettings new] animated:YES]; }
+- (void)openServer { [self.navigationController pushViewController:[DNVOTServiceSettings new] animated:YES]; }
+- (void)close { if (self.navigationController.viewControllers.count > 1) [self.navigationController popViewControllerAnimated:YES]; else [self dismissViewControllerAnimated:YES completion:nil]; }
 @end

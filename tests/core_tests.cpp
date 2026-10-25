@@ -1,5 +1,6 @@
 #include "../src/VOTWire.hpp"
 #include "../src/SyncPolicy.hpp"
+#include "../src/ControlState.hpp"
 #include <cassert>
 #include <iostream>
 #include <limits>
@@ -17,6 +18,7 @@ int main(int argc, char **argv) {
         std::string op = argv[1];
         if (op == "session") b = session(argv[2]);
         else if (op == "translation") b = translation(std::string("https://youtu.be/") + argv[2], argc > 3 ? std::stod(argv[3]) : 19, "en", "ru", argc > 4 ? std::string(argv[4]) != "0" : true, false);
+        else if (op == "lively") b = translation(std::string("https://youtu.be/") + argv[2],19,"en","ru",true,false,"",true);
         else if (op == "custom") b = translation(argv[2], argc > 3 ? std::stod(argv[3]) : 310, "en", "ru", argc > 5 ? std::string(argv[5]) != "0" : true, false, argc > 4 ? argv[4] : "");
         else return 2;
         for (uint8_t c : b) std::cout << std::hex << std::setw(2) << std::setfill('0') << (int)c;
@@ -34,6 +36,15 @@ int main(int argc, char **argv) {
     assert(text(hf, 1) == "video_file_url" && text(hf, 2) == "https://example.com/audio");
     t = translation("url", 19, "de", "ru", false, true);
     f = parse(t.data(), t.size()); assert(value(f, 5) == 0 && value(f, 9) == 1);
+    t = translation("url",19,"en","ru",true,false,"",true);
+    f = parse(t.data(),t.size()); assert(value(f,18)==1);
+    auto state=controlState(false,false,100,105);assert(state.phase==ControlPhase::idle && state.elapsed==0);
+    state=controlState(true,false,100,165.9);assert(state.phase==ControlPhase::waiting && state.elapsed==65);
+    state=controlState(true,true,100,200);assert(state.phase==ControlPhase::active);
+    state=controlState(false,true,100,200);assert(state.phase==ControlPhase::idle); // disable even with a ready item
+    state=controlState(true,false,100,99);assert(state.elapsed==0); // clock rollback
+    state=controlState(true,false,NAN,200);assert(state.elapsed==0);
+    state=controlState(true,false,0,1e100);assert(state.elapsed==86400); // bounded conversion
     Bytes audioBytes = {1, 2, 3, 0, 255};
     auto a = audio("tid", "url", "fid", audioBytes.data(), audioBytes.size());
     f = parse(a.data(), a.size()); assert(f.count(6) == 1 && f.count(4) == 0);
@@ -56,5 +67,5 @@ int main(int argc, char **argv) {
     d = sync(10, NAN, 0, 1, true, false, true, 100); assert(!d.audible);
     d = sync(10, 10, 0, INFINITY, true, false, true, 100); assert(!d.audible);
     d = sync(10, 10, 0, 0, true, false, true, 100); assert(!d.audible);
-    std::cout << "PASS: protobuf bounds, session, translation/help/audio fields, binary payload, pause, seek, rate, ads, buffering, partial coverage, offset, invalid clocks\n";
+    std::cout << "PASS: protobuf bounds, session, translation/help/audio fields, binary payload, lively voice, control idle/wait/ready/disable, pause, seek, rate, ads, buffering, partial coverage, offset, invalid clocks\n";
 }

@@ -35,7 +35,12 @@ static inline double DNNumber(id obj, NSString *name, double fallback = 0) {
             case 'q': v = ((long long (*)(id, SEL))objc_msgSend)(obj, s); break;
             case 'Q': v = ((unsigned long long (*)(id, SEL))objc_msgSend)(obj, s); break;
             case 'i': v = ((int (*)(id, SEL))objc_msgSend)(obj, s); break;
-            case 'B': case 'c': v = ((BOOL (*)(id, SEL))objc_msgSend)(obj, s); break;
+            case 'I': v = ((unsigned int (*)(id, SEL))objc_msgSend)(obj, s); break;
+            case 's': v = ((short (*)(id, SEL))objc_msgSend)(obj, s); break;
+            case 'S': v = ((unsigned short (*)(id, SEL))objc_msgSend)(obj, s); break;
+            case 'c': v = ((signed char (*)(id, SEL))objc_msgSend)(obj, s); break;
+            case 'C': v = ((unsigned char (*)(id, SEL))objc_msgSend)(obj, s); break;
+            case 'B': v = ((BOOL (*)(id, SEL))objc_msgSend)(obj, s); break;
             default: return fallback;
         }
         return std::isfinite(v) ? v : fallback;

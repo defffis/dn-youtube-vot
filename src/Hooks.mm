@@ -1,10 +1,11 @@
 #import "DNVOT.h"
 #import "Runtime.hpp"
 
-static BOOL DNHook(Class cls, NSString *name, char result, const char *args, id (^factory)(IMP, SEL)) {
+BOOL DNVOTHook(Class cls, NSString *name, char result, const char *args, id (^factory)(IMP, SEL)) {
+    if (!cls) return NO;
     static NSMutableSet<NSString *> *installed;
     if (!installed) installed = [NSMutableSet new];
-    NSString *key = [NSString stringWithFormat:@"%@/%@", NSStringFromClass(cls), name];
+    NSString *key = [NSString stringWithFormat:@"%@/%d/%@", NSStringFromClass(cls), class_isMetaClass(cls), name];
     if ([installed containsObject:key]) return NO;
     SEL sel = NSSelectorFromString(name);
     Method method = class_getInstanceMethod(cls, sel);
@@ -24,6 +25,7 @@ static BOOL DNHook(Class cls, NSString *name, char result, const char *args, id 
     [installed addObject:key];
     return YES;
 }
+#define DNHook DNVOTHook
 static void DNObserve(id obj) {
     __weak id weak = obj;
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -68,5 +70,5 @@ void DNVOTInstallHooks(void) {
             ((void (*)(id, SEL, float))original)(obj, sel, actual);
         };
     });
-    if (count) NSLog(@"[DNVOT] 0.1.1-alpha installed %lu native hooks", (unsigned long)count);
+    if (count) NSLog(@"[DNVOT] 0.2.0-alpha installed %lu native hooks", (unsigned long)count);
 }

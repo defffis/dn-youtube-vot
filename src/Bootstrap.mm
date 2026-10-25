@@ -9,7 +9,6 @@
 
 static NSString *DNBootState = @"constructor scheduled";
 static NSUInteger DNBootPasses;
-static const void *DNSettingsButtonKey = &DNSettingsButtonKey;
 
 static UIWindow *DNActiveWindow(void) {
     UIWindow *fallback = nil;
@@ -38,7 +37,7 @@ NSString *DNVOTBootstrapDiagnostics(void) {
         DNBootState, (unsigned long)DNBootPasses, NSBundle.mainBundle.bundleIdentifier,
         [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleExecutable"],
         NSClassFromString(@"YTPlayerViewController") ? @"YES" : @"NO",
-        NSStringFromClass(DNActiveWindow().rootViewController.class), @"DNYouTubeVOT 0.1.1-alpha"];
+        NSStringFromClass(DNActiveWindow().rootViewController.class), @"DNYouTubeVOT 0.2.0-alpha"];
 }
 
 static void DNVisit(UIViewController *vc, DNVOTBootstrap *bootstrap, NSMutableSet *visited, NSUInteger depth, NSUInteger *budget) {
@@ -48,17 +47,7 @@ static void DNVisit(UIViewController *vc, DNVOTBootstrap *bootstrap, NSMutableSe
     if (vc.isViewLoaded && vc.view.window && !vc.view.hidden) {
         Class playerClass = NSClassFromString(@"YTPlayerViewController");
         if (playerClass && [vc isKindOfClass:playerClass]) [DNVOTController.shared observePlayer:vc];
-        // A visible navigation item, without relying on YouTube's private section IDs.
-        if ([name hasPrefix:@"YT"] && [name containsString:@"Settings"] && !vc.presentedViewController) {
-            UIBarButtonItem *item = objc_getAssociatedObject(vc, DNSettingsButtonKey);
-            if (!item) {
-                item = [[UIBarButtonItem alloc] initWithTitle:@"VOT" style:UIBarButtonItemStylePlain target:bootstrap action:@selector(open)];
-                item.accessibilityLabel = @"Настройки озвучки с переводом";
-                objc_setAssociatedObject(vc, DNSettingsButtonKey, item, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-            }
-            NSArray *items = vc.navigationItem.rightBarButtonItems ?: @[];
-            if (![items containsObject:item]) vc.navigationItem.rightBarButtonItems = [items arrayByAddingObject:item];
-        }
+
     }
     // UIKit containment plus the exact watch-controller accessors seen in 21.40.5.
     for (UIViewController *child in vc.childViewControllers) DNVisit(child, bootstrap, visited, depth + 1, budget);
@@ -98,13 +87,15 @@ static void DNVisit(UIViewController *vc, DNVOTBootstrap *bootstrap, NSMutableSe
             if (!window) { DNBootState = @"waiting for foreground window"; return; }
 #ifndef DNVOT_PROBE
             [DNVOTController shared];
-            DNVOTInstallHooks(); // Per-selector idempotence; classes/methods may appear later.
+            DNVOTInstallHooks();
+            DNVOTInstallNativeUI();
             NSUInteger budget = 128;
             DNVisit(window.rootViewController, self, [NSMutableSet new], 0, &budget);
             DNBootState = DNVOTController.shared.player ? @"foreground; player attached" : @"foreground; searching for player";
 #else
             DNBootState = @"probe loaded; no engine or hooks";
 #endif
+#ifdef DNVOT_PROBE
             if (!self.launcher) {
                 self.launcher = [UIButton buttonWithType:UIButtonTypeSystem];
                 self.launcher.backgroundColor = [UIColor.blackColor colorWithAlphaComponent:0.82];
@@ -112,11 +103,7 @@ static void DNVisit(UIViewController *vc, DNVOTBootstrap *bootstrap, NSMutableSe
                 self.launcher.layer.cornerRadius = 18;
                 self.launcher.titleLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
                 self.launcher.accessibilityLabel = @"Открыть панель VOT";
-#ifdef DNVOT_PROBE
-                [self.launcher setTitle:@"VOT TEST" forState:UIControlStateNormal];
-#else
-                [self.launcher setTitle:@"VOT 0.1.1" forState:UIControlStateNormal];
-#endif
+[self.launcher setTitle:@"VOT TEST" forState:UIControlStateNormal];
                 [self.launcher addTarget:self action:@selector(open) forControlEvents:UIControlEventTouchUpInside];
             }
             // This fallback belongs to the normal app window, not a separate overlay window.
@@ -125,7 +112,6 @@ static void DNVisit(UIViewController *vc, DNVOTBootstrap *bootstrap, NSMutableSe
             CGFloat y = CGRectGetHeight(window.bounds) - window.safeAreaInsets.bottom - 106;
             self.launcher.frame = CGRectMake(MAX(8, x), MAX(window.safeAreaInsets.top, y), 98, 36);
             [window bringSubviewToFront:self.launcher];
-#ifdef DNVOT_PROBE
             if (!self.announced) { self.announced = YES; [self open]; }
 #endif
         } @catch (NSException *e) { DNBootState = [@"bootstrap exception: " stringByAppendingString:e.reason ?: e.name]; NSLog(@"[DNVOT] %@", DNBootState); }

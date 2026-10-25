@@ -1,0 +1,26 @@
+{
+  "engine": "Yandex VOT",
+  "video_id": "xvFZjo5PgG0",
+  "input_kind": "youtube",
+  "video_url": "https://youtu.be/xvFZjo5PgG0",
+  "time_utc": "2026-10-25T15:10:22Z",
+  "events": [
+    {
+      "path": "/session/create",
+      "http_status": 200
+    },
+    {
+      "path": "/video-translation/translate",
+      "http_status": 200
+    },
+    {
+      "translation_status": 6,
+      "remaining_seconds": 77,
+      "has_audio_url": false,
+      "message": "",
+      "detected_language": ""
+    }
+  ],
+  "translated_audio_received": false,
+  "ios_runtime_tested": false
+}

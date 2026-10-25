@@ -1,9 +1,9 @@
 #import "DNVOT.h"
+#import "Preferences.h"
 #import <CommonCrypto/CommonHMAC.h>
 #include "VOTWire.hpp"
 #include <algorithm>
 
-static NSString *const DNHost = @"https://api.browser.yandex.ru";
 static NSString *const DNComponent = @"26.10.0.1796";
 static NSString *const DNUserAgent = @"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 YaBrowser/26.8.0.0 Safari/537.36";
 static const NSUInteger DNMaxAudio = 32 * 1024 * 1024;
@@ -54,15 +54,23 @@ static NSString *DNSign(NSData *data) {
 }
 - (void)URLSession:(__unused NSURLSession *)session downloadTask:(NSURLSessionDownloadTask *)task didFinishDownloadingToURL:(NSURL *)url {
     NSHTTPURLResponse *response = (NSHTTPURLResponse *)task.response;
-    if (![response isKindOfClass:NSHTTPURLResponse.class] || response.statusCode != 200) { [self finish:nil error:@"YouTube не отдал полный аудиопоток"]; return; }
+    if (![response isKindOfClass:NSHTTPURLResponse.class]) { [self finish:nil error:@"YouTube не отдал HTTP-аудиопоток"]; return; }
+    BOOL fullResponse=response.statusCode==200;
+    if (response.statusCode==206) {
+        unsigned long long first=1,last=0,total=0;
+        NSString *range=[response valueForHTTPHeaderField:@"Content-Range"];
+        fullResponse=range && sscanf(range.UTF8String,"bytes %llu-%llu/%llu",&first,&last,&total)==3 && first==0 && total>0 && last==total-1 && total<=DNMaxAudio;
+    }
+    if (!fullResponse) { [self finish:nil error:[NSString stringWithFormat:@"YouTube не отдал полный аудиопоток (HTTP %ld)",(long)response.statusCode]]; return; }
     NSNumber *size = nil; [url getResourceValue:&size forKey:NSURLFileSizeKey error:nil];
     if (size.unsignedLongLongValue > DNMaxAudio) { [self finish:nil error:@"Исходное аудио превышает 32 МБ"]; return; }
     NSData *data = [NSData dataWithContentsOfURL:url options:NSDataReadingMappedIfSafe error:nil];
+    if (response.statusCode==206 && response.expectedContentLength>0 && data.length!=(NSUInteger)response.expectedContentLength) { [self finish:nil error:@"Исходный аудиопоток загрузился не полностью"];return; }
     if (!data.length || data.length > DNMaxAudio) { [self finish:nil error:@"Не удалось прочитать исходное аудио"]; return; }
     [self finish:data error:nil];
 }
 - (void)URLSession:(__unused NSURLSession *)session task:(__unused NSURLSessionTask *)task didCompleteWithError:(NSError *)error {
-    if (error) [self finish:nil error:error.localizedDescription];
+    if (error) [self finish:nil error:[NSString stringWithFormat:@"Source download network error %ld",(long)error.code]];
 }
 @end
 
@@ -85,6 +93,17 @@ static NSString *DNSign(NSData *data) {
 @property(nonatomic) BOOL usedServerFallback;
 @property(nonatomic) NSTimeInterval started;
 @property(nonatomic,copy) NSString *lastAudio;
+@property(nonatomic,copy) NSString *host;
+@property(nonatomic,copy) NSString *transport;
+@property(nonatomic,copy) NSString *apiToken;
+@property(nonatomic) BOOL lively;
+@property(nonatomic,strong) NSMutableArray<NSString *> *trace;
+@property(nonatomic,copy) NSString *sourceFailure;
+@end
+@interface DNVOTNoRedirect : NSObject <NSURLSessionTaskDelegate>
+@end
+@implementation DNVOTNoRedirect
+- (void)URLSession:(__unused NSURLSession *)session task:(__unused NSURLSessionTask *)task willPerformHTTPRedirection:(__unused NSHTTPURLResponse *)response newRequest:(__unused NSURLRequest *)request completionHandler:(void (^)(NSURLRequest *))completion { completion(nil); }
 @end
 @implementation DNVOTClient
 - (instancetype)init {
@@ -92,20 +111,26 @@ static NSString *DNSign(NSData *data) {
         NSURLSessionConfiguration *config = NSURLSessionConfiguration.ephemeralSessionConfiguration;
         config.timeoutIntervalForRequest = 45; config.timeoutIntervalForResource = 120;
         config.HTTPCookieStorage = nil; config.HTTPShouldSetCookies = NO;
-        self.session = [NSURLSession sessionWithConfiguration:config];
+        self.session = [NSURLSession sessionWithConfiguration:config delegate:[DNVOTNoRedirect new] delegateQueue:nil];
         self.tasks = [NSMutableSet set];
+        self.trace = [NSMutableArray new];
     }
     return self;
 }
 - (void)cancel {
     self.generation++;
+    self.apiToken = nil;
     for (NSURLSessionTask *task in self.tasks) [task cancel];
     [self.tasks removeAllObjects];
     [self.download cancel]; self.download = nil;
 }
+- (void)traceEvent:(NSString *)event { [self.trace addObject:event];if (self.trace.count>14) [self.trace removeObjectAtIndex:0]; }
+- (NSString *)diagnostics {
+    return [NSString stringWithFormat:@"Transport: %@\nServer: %@\nLively requested: %@\nSource URL available: %@\nSource itag: %ld\nSource failure: %@\nNetwork trace:\n%@",self.transport ?: @"—",self.host ?: @"—",self.lively ? @"YES" : @"NO",self.sourceURL ? @"YES" : @"NO",(long)self.itag,self.sourceFailure ?: @"—",[self.trace componentsJoinedByString:@"\n"]];
+}
 - (void)request:(NSString *)path body:(NSData *)body signedRequest:(BOOL)signedRequest method:(NSString *)method json:(BOOL)json completion:(void (^)(NSData *, NSString *))completion {
     NSUInteger generation = self.generation;
-    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:[DNHost stringByAppendingString:path]]];
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:[self.host stringByAppendingString:path]]];
     request.HTTPMethod = method; request.HTTPBody = body;
     [request setValue:DNUserAgent forHTTPHeaderField:@"User-Agent"];
     [request setValue:json ? @"application/json" : @"application/x-protobuf" forHTTPHeaderField:@"Content-Type"];
@@ -118,6 +143,14 @@ static NSString *DNSign(NSData *data) {
         [request setValue:self.secret forHTTPHeaderField:@"Sec-Vtrans-Sk"];
         [request setValue:[NSString stringWithFormat:@"%@:%@", DNSign([token dataUsingEncoding:NSUTF8StringEncoding]), token] forHTTPHeaderField:@"Sec-Vtrans-Token"];
     }
+    if (self.lively && [path isEqual:@"/video-translation/translate"] && self.apiToken.length) [request setValue:[@"OAuth " stringByAppendingString:self.apiToken] forHTTPHeaderField:@"Authorization"];
+    if ([self.transport isEqual:@"worker"]) {
+        // VOTNextWorkerProvider format: binary body + base64 JSON upstream headers.
+        NSDictionary *headers=request.allHTTPHeaderFields;
+        NSData *encoded=[NSJSONSerialization dataWithJSONObject:headers options:0 error:nil];
+        request.allHTTPHeaderFields=@{@"X-VOT-Headers":[encoded base64EncodedStringWithOptions:0],@"User-Agent":@"vot.js/3.2.0",@"Content-Type":json ? @"application/json" : @"application/x-protobuf"};
+    }
+    [self traceEvent:[NSString stringWithFormat:@"%@ %@ bytes=%lu",method,path,(unsigned long)body.length]];
     __weak DNVOTClient *weakSelf = self;
     __block __weak NSURLSessionDataTask *weakTask;
     NSURLSessionDataTask *task = [self.session dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
@@ -127,7 +160,8 @@ static NSString *DNSign(NSData *data) {
             if (weakTask) [strong.tasks removeObject:weakTask];
             if (generation != strong.generation) return;
             NSHTTPURLResponse *http = (NSHTTPURLResponse *)response;
-            if (error) { completion(nil, [NSString stringWithFormat:@"Сеть: %@", error.localizedDescription]); return; }
+            if (error) { [strong traceEvent:[NSString stringWithFormat:@"network code=%ld",(long)error.code]];completion(nil, [NSString stringWithFormat:@"Ошибка сети (%ld)", (long)error.code]); return; }
+            [strong traceEvent:[NSString stringWithFormat:@"%@ HTTP %ld",path,[http isKindOfClass:NSHTTPURLResponse.class] ? (long)http.statusCode : 0L]];
             if (![http isKindOfClass:NSHTTPURLResponse.class] || http.statusCode != 200) {
                 if (http.statusCode == 401 || http.statusCode == 403) { strong.secret = nil; strong.sessionExpiry = 0; }
                 completion(nil, [NSString stringWithFormat:@"Сервис перевода вернул HTTP %ld", (long)http.statusCode]); return;
@@ -156,6 +190,16 @@ static NSString *DNSign(NSData *data) {
 }
 - (void)startVideo:(NSString *)videoID duration:(double)duration from:(NSString *)from to:(NSString *)to sourceAudio:(NSURL *)audioURL itag:(NSInteger)itag {
     [self cancel];
+    DNVOTPreferences *prefs=DNVOTPreferences.shared;
+    self.host=[DNVOTPreferences normalizedServer:prefs.serverURL];self.transport=prefs.transport;
+    self.lively=prefs.lively;self.apiToken=nil;self.secret=nil;self.sessionExpiry=0;
+    [self.trace removeAllObjects];self.sourceFailure=nil;
+    if (!self.host) {if (self.failed) self.failed(@"Некорректный HTTPS-сервер VOT");return;}
+    if (self.lively) {
+        if (![self.host isEqual:@"https://api.browser.yandex.ru"] || ![self.transport isEqual:@"direct"]) {if (self.failed) self.failed(@"Для живых голосов выберите «Яндекс напрямую». OAuth не отправляется стороннему серверу.");return;}
+        self.apiToken=prefs.token;
+        if (!self.apiToken.length) {if (self.failed) self.failed(@"Войдите в Яндекс в настройках VOT или выключите живые голоса.");return;}
+    }
     self.videoURL = [@"https://youtu.be/" stringByAppendingString:videoID];
     self.duration = duration; self.from = from; self.to = to; self.sourceURL = audioURL; self.itag = itag;
     self.attempts = 0; self.attemptedAudio = NO; self.usedServerFallback = NO; self.lastAudio = nil;
@@ -181,12 +225,13 @@ static NSString *DNSign(NSData *data) {
         auto bytes = dnvot::translation(DNUTF8(self.videoURL), self.duration,
                                       DNUTF8([self.from isEqualToString:@"auto"] ? @"en" : self.from),
                                       DNUTF8(self.to), first, ![self.from isEqualToString:@"auto"],
-                                      DNUTF8(self.sourceURL.absoluteString));
+                                      DNUTF8(self.sourceURL.absoluteString), self.lively);
         [self request:@"/video-translation/translate" body:DNData(bytes) signedRequest:YES method:@"POST" json:NO completion:^(NSData *data, NSString *error) {
             if (error) { if (self.failed) self.failed(error); return; }
             try {
                 auto fields = dnvot::parse((const uint8_t *)data.bytes, data.length);
                 NSInteger status = dnvot::value(fields, 4);
+                [self traceEvent:[NSString stringWithFormat:@"VOT status=%ld retry=%llu",(long)status,(unsigned long long)dnvot::value(fields,12)]];
                 double remaining = std::min(1200.0, (double)dnvot::value(fields, 5, 10));
                 NSString *translationID = DNText(dnvot::text(fields, 7));
                 if (status == 1 || status == 5) {
@@ -210,7 +255,7 @@ static NSString *DNSign(NSData *data) {
                         [self later:remaining];
                     }
                 } else if (status == 7) {
-                    if (self.failed) self.failed(@"Яндекс требует авторизацию для этого видео. В этой версии вход в аккаунт не реализован.");
+                    if (self.failed) self.failed(@"Яндекс требует вход. Откройте VOT → Аккаунт Яндекса.");
                 } else {
                     NSString *message = DNText(dnvot::text(fields, 9));
                     if (message.length > 180) message = [message substringToIndex:180];
@@ -249,6 +294,7 @@ static NSString *DNSign(NSData *data) {
 - (void)serverFallback:(NSString *)translationID {
     if (self.usedServerFallback) { if (self.failed) self.failed(@"Не удалось передать исходное аудио"); return; }
     self.usedServerFallback = YES;
+    [self traceEvent:@"server audio fallback"];
     if (self.status) self.status(@"Прямой поток недоступен. Запрашивается серверное получение аудио…");
     NSData *body = [NSJSONSerialization dataWithJSONObject:@{ @"video_url": self.videoURL } options:0 error:nil];
     [self request:@"/video-translation/fail-audio-js" body:body signedRequest:NO method:@"PUT" json:YES completion:^(NSData *data, NSString *error) {
@@ -262,7 +308,7 @@ static NSString *DNSign(NSData *data) {
 - (void)provideAudio:(NSString *)translationID {
     self.attemptedAudio = YES;
     NSString *host = self.sourceURL.host.lowercaseString;
-    if (![self.sourceURL.scheme.lowercaseString isEqualToString:@"https"] || ![host hasSuffix:@".googlevideo.com"]) { [self serverFallback:translationID]; return; }
+    if (![self.sourceURL.scheme.lowercaseString isEqualToString:@"https"] || ![host hasSuffix:@".googlevideo.com"]) { self.sourceFailure=@"No supported googlevideo audio URL from native player";[self serverFallback:translationID]; return; }
     if (self.status) self.status(@"Загрузка исходного аудио для перевода…");
     self.download = [DNAudioDownload new];
     NSUInteger generation = self.generation;
@@ -275,7 +321,8 @@ static NSString *DNSign(NSData *data) {
         DNVOTClient *strong = weakSelf;
         if (!strong || strong.generation != generation) return;
         strong.download = nil;
-        if (error || !audio.length) { [strong serverFallback:translationID]; return; }
+        if (error || !audio.length) { strong.sourceFailure=error ?: @"Empty source audio";[strong serverFallback:translationID]; return; }
+        [strong traceEvent:[NSString stringWithFormat:@"source audio bytes=%lu",(unsigned long)audio.length]];
         if (strong.status) strong.status(@"Передача аудио сервису перевода…");
         [strong uploadAudio:audio translation:translationID fallback:NO];
     };
