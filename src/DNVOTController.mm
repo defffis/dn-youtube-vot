@@ -100,9 +100,14 @@ static NSString *const DNUpdate = @"DNVoiceTranslationUpdated";
         NSUInteger elapsed = state.elapsed;
         title = [NSString stringWithFormat:@"%lu:%02lu", (unsigned long)(elapsed/60), (unsigned long)(elapsed%60)];
     }
-    if (![[button titleForState:UIControlStateNormal] isEqualToString:title]) [button setTitle:title forState:UIControlStateNormal];
-    UIImage *icon = waiting ? nil : [UIImage systemImageNamed:ready ? @"waveform.bubble.fill" : @"waveform.bubble"];
-    [button setImage:icon forState:UIControlStateNormal];
+    static UIImage *voiceIcon;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ voiceIcon = [[UIImage systemImageNamed:@"waveform" withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:22 weight:UIImageSymbolWeightSemibold]] imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate]; });
+    UIImage *icon = waiting ? nil : voiceIcon;
+    if (!waiting && !icon) title = @"VOT";
+    NSString *oldTitle = [button titleForState:UIControlStateNormal];
+    if (oldTitle != title && ![oldTitle isEqualToString:title]) [button setTitle:title forState:UIControlStateNormal];
+    if ([button imageForState:UIControlStateNormal] != icon) [button setImage:icon forState:UIControlStateNormal];
     button.tintColor = ready ? UIColor.systemGreenColor : UIColor.whiteColor;
     [button setTitleColor:button.tintColor forState:UIControlStateNormal];
     button.accessibilityLabel = waiting ? @"Отменить подготовку перевода" : (ready ? @"Выключить перевод" : @"Включить перевод");
@@ -287,8 +292,9 @@ static NSString *const DNUpdate = @"DNVoiceTranslationUpdated";
 }
 - (NSString *)diagnostics {
     id active = DNObject(self.player, @"activeVideo");
-    NSString *engine = [NSString stringWithFormat:@"DN YouTube Voice Translation 0.2.0-alpha\nYouTube: %@\niOS: %@\nPlayer: %@\nVideo: %@\nEnabled: %@\nStatus: %@\nPlayer state: %.0f\nContent time: %.3f\nRate: %.3f\nAudio state: %ld\nAudio time: %.3f\nAd: %.0f\nExternal playback: %.0f\nPartial translation: %@\nEngine: Yandex VOT / %@", [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"], UIDevice.currentDevice.systemVersion, NSStringFromClass([self.player class]), self.videoID ?: @"—", self.enabled ? @"YES" : @"NO", self.statusText, DNNumber(self.player, @"playerState", -1), DNNumber(self.player, @"contentVideoMediaTime", -1), DNNumber(DNObject(self.player, @"activePlaybackRateModel"), @"activeRate", -1), (long)self.audio.timeControlStatus, self.audio ? CMTimeGetSeconds(self.audio.currentTime) : 0, DNNumber(self.player, @"isPlayingAd"), DNNumber(active, @"isExternalPlaybackActive"), self.partial ? @"YES" : @"NO", @"26.10.0.1796"];
-    return [engine stringByAppendingFormat:@"\n%@\n%@\n%@", DNVOTBootstrapDiagnostics(), DNVOTNativeDiagnostics(), [self.client diagnostics]];
+    NSString *engine = [NSString stringWithFormat:@"DN YouTube Voice Translation 0.2.1-alpha\nYouTube: %@\niOS: %@\nPlayer: %@\nVideo: %@\nEnabled: %@\nStatus: %@\nPlayer state: %.0f\nContent time: %.3f\nRate: %.3f\nAudio state: %ld\nAudio time: %.3f\nAd: %.0f\nExternal playback: %.0f\nPartial translation: %@\nEngine: Yandex VOT / %@", [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"], UIDevice.currentDevice.systemVersion, NSStringFromClass([self.player class]), self.videoID ?: @"—", self.enabled ? @"YES" : @"NO", self.statusText, DNNumber(self.player, @"playerState", -1), DNNumber(self.player, @"contentVideoMediaTime", -1), DNNumber(DNObject(self.player, @"activePlaybackRateModel"), @"activeRate", -1), (long)self.audio.timeControlStatus, self.audio ? CMTimeGetSeconds(self.audio.currentTime) : 0, DNNumber(self.player, @"isPlayingAd"), DNNumber(active, @"isExternalPlaybackActive"), self.partial ? @"YES" : @"NO", @"26.10.0.1796"];
+    NSString *playback = [NSString stringWithFormat:@"Audio item status: %ld\nAudio rate: %.3f\nAudio waiting reason: %@\nSync user paused: %@\nSync seeking: %@\nSync advance age: %.3f", (long)self.audio.currentItem.status, self.audio.rate, self.audio.reasonForWaitingToPlay ?: @"—", self.userPaused ? @"YES" : @"NO", self.seeking ? @"YES" : @"NO", NSProcessInfo.processInfo.systemUptime-self.lastAdvance];
+    return [engine stringByAppendingFormat:@"\n%@\n%@\n%@\n%@", DNVOTBootstrapDiagnostics(), DNVOTNativeDiagnostics(), playback, [self.client diagnostics]];
 }
 @end
 
@@ -373,7 +379,7 @@ static NSString *const DNUpdate = @"DNVoiceTranslationUpdated";
     [self.action addTarget:self action:@selector(toggle) forControlEvents:UIControlEventTouchUpInside]; [self.stack addArrangedSubview:self.action];
     UIButton *diagnostics = [UIButton buttonWithType:UIButtonTypeSystem]; [diagnostics setTitle:@"Скопировать диагностику" forState:UIControlStateNormal];
     [diagnostics addTarget:self action:@selector(copyDiagnostics) forControlEvents:UIControlEventTouchUpInside]; [self.stack addArrangedSubview:diagnostics];
-    [self.stack addArrangedSubview:[self label:@"0.2.0-alpha · Диагностическая сборка · Проверка на устройстве ещё требуется" detail:YES]];
+    [self.stack addArrangedSubview:[self label:@"0.2.1-alpha · Диагностическая сборка · Проверка на устройстве ещё требуется" detail:YES]];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(refresh) name:DNUpdate object:nil]; [self refresh];
 }
 - (void)dealloc { [NSNotificationCenter.defaultCenter removeObserver:self]; }
