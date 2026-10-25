@@ -4,6 +4,7 @@
 #include "../src/PlaybackClock.hpp"
 #include "../src/LocalTransport.hpp"
 #include "../src/FeaturePolicy.hpp"
+#include "../src/CachePolicy.hpp"
 #include <cassert>
 #include <iostream>
 #include <limits>
@@ -16,6 +17,18 @@ static void reject(const dnvot::Bytes &b) {
 }
 int main(int argc, char **argv) {
     using namespace dnvot;
+    const double saved=1700000000;
+    assert(!cacheExpired(saved+86399.999,saved,saved));
+    assert(cacheExpired(saved+86400,saved,saved));
+    assert(cacheExpired(saved+90000,saved,saved+89999)); // a cache hit does not extend TTL
+    assert(!cacheExpired(saved+100,saved,saved-90000)); // creation time, not LRU access time
+    assert(cacheExpired(saved+90000,NAN,saved)); // old file fallback
+    assert(!cacheExpired(saved-100,saved,saved)); // wall clock rollback
+    assert(!cacheExpired(NAN,saved,saved));
+    assert(cacheExpired(saved,0,0)); // missing timestamps cannot keep a file forever
+    assert(!cacheMayDelete(saved+90000,saved,saved,true)); // protect active playback
+    assert(cacheMayDelete(saved+90000,saved,saved,false)); // delete once released
+    assert(!cacheMayDelete(saved+10,saved,saved,false));
     assert(sameVideo("", "")); // nil/nil must not create a stop every 200 ms
     assert(!sameVideo("", "3BhO899BhyY"));
     assert(languageCode("EN-us")=="en" && languageCode("ru.4")=="ru");
@@ -138,5 +151,5 @@ int main(int argc, char **argv) {
     d = sync(10, NAN, 0, 1, true, false, true, 100); assert(!d.audible);
     d = sync(10, 10, 0, INFINITY, true, false, true, 100); assert(!d.audible);
     d = sync(10, 10, 0, 0, true, false, true, 100); assert(!d.audible);
-    std::cout << "PASS: language normalization, auto exclusions/unknown timeout, proxy modes/prefix/query preservation, empty ID equality, protobuf bounds, session, translation/help/audio fields, binary payload, lively voice, control idle/wait/armed/playing/disable, measured clock and stale pause recovery, local transport 400-step playback/seek, bounded restart, 0.5x/2x boundaries, pause, seek, rate, ads, buffering, partial coverage, offset, invalid clocks\n";
+    std::cout << "PASS: absolute cache TTL/boundary/cache hits/active-file protection, language normalization, auto exclusions/unknown timeout, proxy modes/prefix/query preservation, empty ID equality, protobuf bounds, session, translation/help/audio fields, binary payload, lively voice, control idle/wait/armed/playing/disable, measured clock and stale pause recovery, local transport 400-step playback/seek, bounded restart, 0.5x/2x boundaries, pause, seek, rate, ads, buffering, partial coverage, offset, invalid clocks\n";
 }

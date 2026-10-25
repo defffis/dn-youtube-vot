@@ -4,4 +4,6 @@
 + (NSURL *)store:(NSURL *)file key:(NSString *)key;
 + (void)clear;
 + (unsigned long long)bytes;
++ (void)pruneExpired;
++ (void)protect:(NSURL *)url;
 @end

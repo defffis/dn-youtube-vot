@@ -6,11 +6,12 @@ static const int64_t DNLocalLimit=128*1024*1024;
 @property(nonatomic,strong) NSURLSession *session;
 @property(nonatomic,strong) NSURLSessionDownloadTask *task;
 @property(nonatomic) BOOL finished;
+@property(nonatomic) BOOL cancelled;
 @end
 @implementation DNLocalAudioDownload
 - (void)finish:(NSURL *)url error:(NSString *)error {
     if (self.finished) return;self.finished=YES;
-    [DNFlightRecorder.shared event:@"audio_download_finish" fields:@{@"ok":@(url!=nil),@"reason":error ?: @""}];
+    [DNFlightRecorder.shared event:@"audio_download_finish" fields:@{@"ok":@(url!=nil),@"reason":error ?: @"",@"outcome":self.cancelled ? @"cancelled" : (url ? @"success" : @"error")}];
     if (self.completion) self.completion(url,error);
     self.completion=nil;self.progress=nil;
     [self.session invalidateAndCancel];self.session=nil;self.task=nil;
@@ -24,7 +25,7 @@ static const int64_t DNLocalLimit=128*1024*1024;
     self.task=[self.session downloadTaskWithURL:url];[self.task resume];
     [DNFlightRecorder.shared event:@"audio_download_start" fields:@{}];
 }
-- (void)cancel { self.completion=nil;[self finish:nil error:nil]; }
+- (void)cancel { self.cancelled=YES;self.completion=nil;[self finish:nil error:@"cancelled by controller"]; }
 - (void)URLSession:(__unused NSURLSession *)session task:(__unused NSURLSessionTask *)task willPerformHTTPRedirection:(__unused NSHTTPURLResponse *)response newRequest:(NSURLRequest *)request completionHandler:(void (^)(NSURLRequest *))completion {
     completion([request.URL.scheme.lowercaseString isEqual:@"https"] ? request : nil);
 }

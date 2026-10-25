@@ -1,5 +1,8 @@
 #import "TranslationCache.h"
 #import <CommonCrypto/CommonDigest.h>
+#import "FlightRecorder.h"
+#include "CachePolicy.hpp"
+static NSURL *DNProtectedCacheFile;
 @implementation DNTranslationCache
 + (NSURL *)directory {
     NSURL *dir=[[NSFileManager.defaultManager URLsForDirectory:NSCachesDirectory inDomains:NSUserDomainMask].firstObject URLByAppendingPathComponent:@"DNVOT-Audio" isDirectory:YES];
@@ -11,12 +14,14 @@
     return [[self directory] URLByAppendingPathComponent:[name stringByAppendingString:@".mp3"]];
 }
 + (NSURL *)find:(NSString *)key {
+    [self pruneExpired];
     NSURL *url=[self path:key];NSDictionary *a=[NSFileManager.defaultManager attributesOfItemAtPath:url.path error:nil];
     if (![a[NSFileType] isEqual:NSFileTypeRegular] || [a[NSFileSize] unsignedLongLongValue]==0) return nil;
-    if ([NSDate.date timeIntervalSinceDate:a[NSFileModificationDate]]>86400) { [NSFileManager.defaultManager removeItemAtURL:url error:nil];return nil; }
+    if (dnvot::cacheExpired(NSDate.date.timeIntervalSince1970,[a[NSFileCreationDate] timeIntervalSince1970],[a[NSFileModificationDate] timeIntervalSince1970])) return nil;
     [NSFileManager.defaultManager setAttributes:@{NSFileModificationDate:NSDate.date} ofItemAtPath:url.path error:nil];return url;
 }
 + (NSURL *)store:(NSURL *)file key:(NSString *)key {
+    [self pruneExpired];
     NSURL *target=[self path:key];NSFileManager *fm=NSFileManager.defaultManager;
     NSArray *files=[fm contentsOfDirectoryAtURL:[self directory] includingPropertiesForKeys:nil options:0 error:nil];
     files=[files sortedArrayUsingComparator:^NSComparisonResult(NSURL *a,NSURL *b) {
@@ -30,10 +35,26 @@
         if ([fm removeItemAtURL:old error:nil]) used=used>=size ? used-size : 0;
     }
     if (![fm moveItemAtURL:file toURL:target error:nil]) return file;
-    [fm setAttributes:@{NSFileProtectionKey:NSFileProtectionCompleteUntilFirstUserAuthentication} ofItemAtPath:target.path error:nil];return target;
+    NSDate *saved=NSDate.date;
+    [fm setAttributes:@{NSFileProtectionKey:NSFileProtectionCompleteUntilFirstUserAuthentication,NSFileCreationDate:saved,NSFileModificationDate:saved} ofItemAtPath:target.path error:nil];return target;
 }
 + (unsigned long long)bytes {
+    [self pruneExpired];
     unsigned long long total=0;for (NSURL *p in [NSFileManager.defaultManager contentsOfDirectoryAtURL:[self directory] includingPropertiesForKeys:nil options:0 error:nil]) total+=[[NSFileManager.defaultManager attributesOfItemAtPath:p.path error:nil][NSFileSize] unsignedLongLongValue];return total;
 }
 + (void)clear { for (NSURL *p in [NSFileManager.defaultManager contentsOfDirectoryAtURL:[self directory] includingPropertiesForKeys:nil options:0 error:nil]) [NSFileManager.defaultManager removeItemAtURL:p error:nil]; }
++ (void)protect:(NSURL *)url { DNProtectedCacheFile=url; }
++ (void)pruneExpired {
+    NSFileManager *fm=NSFileManager.defaultManager;NSUInteger removed=0,failed=0;
+    double now=NSDate.date.timeIntervalSince1970;
+    for (NSURL *url in [fm contentsOfDirectoryAtURL:[self directory] includingPropertiesForKeys:nil options:0 error:nil]) {
+        if (![url.pathExtension isEqual:@"mp3"]) continue;
+        NSDictionary *a=[fm attributesOfItemAtPath:url.path error:nil];
+        if (![a[NSFileType] isEqual:NSFileTypeRegular]) continue;
+        BOOL active=[url.path isEqual:DNProtectedCacheFile.path];
+        if (!dnvot::cacheMayDelete(now,[a[NSFileCreationDate] timeIntervalSince1970],[a[NSFileModificationDate] timeIntervalSince1970],active)) continue;
+        if ([fm removeItemAtURL:url error:nil]) removed++;else failed++;
+    }
+    if (removed || failed) [DNFlightRecorder.shared event:@"cache_cleanup" fields:@{@"removed":@(removed),@"failed":@(failed),@"ttl_seconds":@(dnvot::cacheTTL)}];
+}
 @end

@@ -70,5 +70,5 @@ void DNVOTInstallHooks(void) {
             ((void (*)(id, SEL, float))original)(obj, sel, actual);
         };
     });
-    if (count) NSLog(@"[DNVOT] 0.3.0-alpha installed %lu native hooks", (unsigned long)count);
+    if (count) NSLog(@"[DNVOT] 0.3.1-alpha installed %lu native hooks", (unsigned long)count);
 }
