@@ -1,0 +1,88 @@
+{
+  "platform": "Ubuntu 24.04 x86_64",
+  "packages": [
+    {
+      "url": "https://snapshot.ubuntu.com/ubuntu/20260828T000000Z/pool/universe/libp/libpfm4/libpfm4_4.13.0%2bgit32-g0d4ed0e-1_amd64.deb",
+      "filename": "libpfm4_4.13.0+git32-g0d4ed0e-1_amd64.deb",
+      "size": 413816,
+      "algorithm": "sha512",
+      "checksum": "b726f54318d7daf635c5724a0976250c89ed0114b8cea9c85254975b7b48f07859eb40de7b6ab075837d65f4a0d2e4070fef186dfdb9c045f9a5bb3569eaea25"
+    },
+    {
+      "url": "https://snapshot.ubuntu.com/ubuntu/20260828T000000Z/pool/main/l/llvm-toolchain-18/libclang-cpp18_18.1.3-1ubuntu1_amd64.deb",
+      "filename": "libclang-cpp18_1%3a18.1.3-1ubuntu1_amd64.deb",
+      "size": 13492572,
+      "algorithm": "sha512",
+      "checksum": "4994619b9d806540d0625e7c3184a85ea1f4fcc4eb311fd54dee7cfe4fa1eadfc5d72491cbf87bbbb32c8cc020a3c7aede96d658fa749e0f7dcd9e47c674803c"
+    },
+    {
+      "url": "https://snapshot.ubuntu.com/ubuntu/20260828T000000Z/pool/main/l/llvm-toolchain-18/libclang1-18_18.1.3-1ubuntu1_amd64.deb",
+      "filename": "libclang1-18_1%3a18.1.3-1ubuntu1_amd64.deb",
+      "size": 7803214,
+      "algorithm": "sha512",
+      "checksum": "44e6ff1a1bac30757e6388d58811e10471698c83e76834bc68f75dd1c421c03769816e1f364a3f3b77d8402da7dff1f014cbd52d3954997d07284d4003f4f356"
+    },
+    {
+      "url": "https://snapshot.ubuntu.com/ubuntu/20260828T000000Z/pool/main/l/llvm-toolchain-18/libllvm18_18.1.3-1ubuntu1_amd64.deb",
+      "filename": "libllvm18_1%3a18.1.3-1ubuntu1_amd64.deb",
+      "size": 27518500,
+      "algorithm": "sha512",
+      "checksum": "c6ebee709a4c4723376d1094d6360a38a003b0b428eede0178a9601b77974b5215e31ac32535114d9e3753bd2c54b3741ae2515780dcfa8bacab362a6b03b616"
+    },
+    {
+      "url": "https://snapshot.ubuntu.com/ubuntu/20260828T000000Z/pool/universe/l/llvm-toolchain-18/clang-18_18.1.3-1ubuntu1_amd64.deb",
+      "filename": "clang-18_1%3a18.1.3-1ubuntu1_amd64.deb",
+      "size": 80040,
+      "algorithm": "sha512",
+      "checksum": "83d641058e81e741c47ca134b991bf823443aba54942424e05addb005ba67b28e0d20b8a0bb8544251fb764616ed9ddc1708b720bdfda8bf6ed84166452fdc16"
+    },
+    {
+      "url": "https://snapshot.ubuntu.com/ubuntu/20260828T000000Z/pool/universe/l/llvm-toolchain-18/libclang-common-18-dev_18.1.3-1ubuntu1_amd64.deb",
+      "filename": "libclang-common-18-dev_1%3a18.1.3-1ubuntu1_amd64.deb",
+      "size": 735998,
+      "algorithm": "sha512",
+      "checksum": "fe69e1072bdde29e08963fe2ff3f6662cc7cfa38da6499de77920594b394e92901f5eb4a08cf2dfb5f3a4b827588c1eb682b47ec6ecce270ec0f6c034cacbc36"
+    },
+    {
+      "url": "https://snapshot.ubuntu.com/ubuntu/20260828T000000Z/pool/universe/l/llvm-toolchain-18/lld-18_18.1.3-1ubuntu1_amd64.deb",
+      "filename": "lld-18_1%3a18.1.3-1ubuntu1_amd64.deb",
+      "size": 1371582,
+      "algorithm": "sha512",
+      "checksum": "a945792d1c2763eab3cb4029a36dc9936a445f772e69076191b900a4d8f265d8520871c601e152899e4f3e3bce83db5bbb7ca6d53fd36c9d0bc78ce232cc3e59"
+    },
+    {
+      "url": "https://snapshot.ubuntu.com/ubuntu/20260828T000000Z/pool/universe/l/llvm-toolchain-18/llvm-18_18.1.3-1ubuntu1_amd64.deb",
+      "filename": "llvm-18_1%3a18.1.3-1ubuntu1_amd64.deb",
+      "size": 25291124,
+      "algorithm": "sha512",
+      "checksum": "7ab61562285cb54da2b8edbba999f582f7a8eed3a0f377823969c80a47ea946f45e546380dfd7f97f01c87101a21db895883bfd4a89b14381ec9a22a5b549a38"
+    },
+    {
+      "url": "https://snapshot.ubuntu.com/ubuntu/20260828T000000Z/pool/universe/l/llvm-toolchain-18/llvm-18-linker-tools_18.1.3-1ubuntu1_amd64.deb",
+      "filename": "llvm-18-linker-tools_1%3a18.1.3-1ubuntu1_amd64.deb",
+      "size": 1313500,
+      "algorithm": "sha512",
+      "checksum": "f123ba33c348cd77ec22f0491e9fb3fd2efd68d1cf3d8cadbe5ff83422f829d7211b39d66df8f93a4855c142e60e50f7588bd4ce5b3873ac989a5ef230a6d1ec"
+    },
+    {
+      "url": "https://snapshot.ubuntu.com/ubuntu/20260828T000000Z/pool/universe/l/llvm-toolchain-18/llvm-18-runtime_18.1.3-1ubuntu1_amd64.deb",
+      "filename": "llvm-18-runtime_1%3a18.1.3-1ubuntu1_amd64.deb",
+      "size": 538178,
+      "algorithm": "sha512",
+      "checksum": "bfb8e04874f4e644f3e881af3595ae78a71cd3a703957cbbed835ab81f139e5a200be90519722ea333fdff59acb4c1c65f666137352df3b0a5596ed5c7cf9240"
+    },
+    {
+      "url": "https://snapshot.ubuntu.com/ubuntu/20260828T000000Z/pool/universe/l/llvm-toolchain-18/llvm-18-tools_18.1.3-1ubuntu1_amd64.deb",
+      "filename": "llvm-18-tools_1%3a18.1.3-1ubuntu1_amd64.deb",
+      "size": 534364,
+      "algorithm": "sha512",
+      "checksum": "4ebeccda5b5f7471d20e038b7f7c6ac08b33c8230de332560712fb08a8d46a8a2d634286bd58b3d7223ce4797924eefeb74d8bf51978c316cf2f92e551f198a0"
+    }
+  ],
+  "sdk": {
+    "url": "https://github.com/theos/sdks/releases/download/master-146e41f/iPhoneOS16.5.sdk.tar.xz",
+    "filename": "iPhoneOS16.5.sdk.tar.xz",
+    "algorithm": "sha256",
+    "checksum": "5e0fd3f01266cce4ce012d4a99b38eb56578fca40d09edc81cd83dee958202fb"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "release": "0.1.0-alpha",
+  "build_succeeded": true,
+  "system_dependencies_only": true,
+  "supplied_youtube_version": "21.40.5",
+  "required_selectors_found": true,
+  "unit_tests": "passed with UBSan",
+  "google_protobuf_byte_parity": "passed for session and translation",
+  "macho_signature_code_hashes": "verified",
+  "standalone_dylib_sha256": "b794ffa879c06e0ef74696f6bd878e9a0e2cf5d6eb4b37fdb8d6fa8b7d4e0c25",
+  "ipa_injection_and_zip_checks": "passed",
+  "original_tweaks_preserved": true,
+  "live_control_audio": "MP3 URL received; HTTP 206; 1024 bytes sampled; direct MP4 input",
+  "live_youtube_tests": "service-side translation failed after waiting; runtime upload untested",
+  "ios_runtime_tested": false,
+  "apple_certificate_signed": false,
+  "lively_voice_authentication_implemented": false
+}

@@ -1,0 +1,43 @@
+{
+  "youtube_version": "21.40.5",
+  "inspection": "static Objective-C method metadata from supplied main executable",
+  "required_selectors_found": true,
+  "methods": {
+    "YTPlayerViewController": {
+      "loadView": "v16@0:8",
+      "currentVideoID": "@16@0:8",
+      "contentVideoID": "@16@0:8",
+      "currentVideoTotalMediaTime": "d16@0:8",
+      "contentVideoMediaTime": "d16@0:8",
+      "currentVideoMediaTime": "d16@0:8",
+      "activeVideo": "@16@0:8",
+      "activePlaybackRateModel": "@16@0:8",
+      "volume": "f16@0:8",
+      "setVolume:": "v20@0:8f16",
+      "play": "v16@0:8",
+      "pause": "v16@0:8",
+      "pauseWithStoppageReason:": "v20@0:8i16",
+      "isPlayingAd": "B16@0:8",
+      "playbackController:didActivateVideo:withPlaybackData:": "v40@0:8@16@24@32"
+    },
+    "YTSingleVideoController": {
+      "selectedAudioFormat": "@16@0:8",
+      "attemptingToPlay": "B16@0:8",
+      "isPeggedToLive": "B16@0:8",
+      "isExternalPlaybackActive": "B16@0:8",
+      "singleVideo": "@16@0:8"
+    },
+    "YTActivePlaybackRateModel": {
+      "activeRate": "f16@0:8"
+    },
+    "YTSingleVideo": {
+      "isLivePlayback": "B16@0:8"
+    },
+    "MLFormat": {
+      "URL": "@16@0:8",
+      "itag": "i16@0:8",
+      "DRMFamily": "C16@0:8"
+    }
+  },
+  "runtime_verified": false
+}

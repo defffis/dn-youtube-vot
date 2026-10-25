@@ -1,0 +1,68 @@
+{
+  "engine": "Yandex VOT",
+  "video_id": "iG9CE55wbtY",
+  "time_utc": "2026-10-25T13:28:39Z",
+  "events": [
+    {
+      "path": "/session/create",
+      "http_status": 200
+    },
+    {
+      "path": "/video-translation/translate",
+      "http_status": 200
+    },
+    {
+      "translation_status": 6,
+      "remaining_seconds": 94,
+      "has_audio_url": false,
+      "message": "",
+      "detected_language": ""
+    },
+    {
+      "path": "/video-translation/fail-audio-js",
+      "http_status": 200
+    },
+    {
+      "path": "/video-translation/audio",
+      "http_status": 200
+    },
+    {
+      "audio_submission_status": 2
+    },
+    {
+      "path": "/video-translation/translate",
+      "http_status": 200
+    },
+    {
+      "translation_status": 2,
+      "remaining_seconds": 71,
+      "has_audio_url": false,
+      "message": "",
+      "detected_language": ""
+    },
+    {
+      "path": "/video-translation/translate",
+      "http_status": 200
+    },
+    {
+      "translation_status": 2,
+      "remaining_seconds": 52,
+      "has_audio_url": false,
+      "message": "",
+      "detected_language": ""
+    },
+    {
+      "path": "/video-translation/translate",
+      "http_status": 200
+    },
+    {
+      "translation_status": 0,
+      "remaining_seconds": null,
+      "has_audio_url": false,
+      "message": "\u0412\u043e\u0437\u043d\u0438\u043a\u043b\u0430 \u043e\u0448\u0438\u0431\u043a\u0430 \u043f\u0440\u0438 \u043f\u0435\u0440\u0435\u0432\u043e\u0434\u0435, \u043f\u043e\u043f\u0440\u043e\u0431\u0443\u0439\u0442\u0435 \u043f\u043e\u0437\u0436\u0435",
+      "detected_language": ""
+    }
+  ],
+  "translated_audio_received": false,
+  "ios_runtime_tested": false
+}

@@ -1,0 +1,31 @@
+{
+  "engine": "Yandex VOT",
+  "video_id": null,
+  "input_kind": "custom_video_url",
+  "video_url": "https://s3.toil.cc/vot/video",
+  "time_utc": "2026-10-25T13:35:40Z",
+  "events": [
+    {
+      "path": "/session/create",
+      "http_status": 200
+    },
+    {
+      "path": "/video-translation/translate",
+      "http_status": 200
+    },
+    {
+      "translation_status": 1,
+      "remaining_seconds": null,
+      "has_audio_url": true,
+      "message": "",
+      "detected_language": ""
+    },
+    {
+      "audio_http_status": 206,
+      "audio_sample_bytes": 1024,
+      "content_type": "audio/mpeg"
+    }
+  ],
+  "translated_audio_received": true,
+  "ios_runtime_tested": false
+}
