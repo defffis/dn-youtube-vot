@@ -45,3 +45,15 @@
 - Есть успешная проверка без сторонних модов и отчёт по совместимости.
 - Нет воспроизводимых падений в основном сценарии.
 - Ограничения сервиса явно отражены в интерфейсе и документации.
+
+## Задачи в GitHub
+
+| Приоритет | Задача |
+|---|---|
+| P0 | [#1 — Проверить запуск и интерфейс на физическом iPhone](https://github.com/defffis/dn-youtube-vot/issues/1) |
+| P0 | [#2 — Подтвердить полный перевод YouTube с передачей исходного аудио](https://github.com/defffis/dn-youtube-vot/issues/2) |
+| P0 | [#3 — Измерить синхронизацию и восстановление громкости на устройстве](https://github.com/defffis/dn-youtube-vot/issues/3) |
+| P0 | [#4 — Проверить независимость на чистой IPA и совместимость модов](https://github.com/defffis/dn-youtube-vot/issues/4) |
+| P1 | [#5 — Реализовать устойчивую передачу больших исходных аудиофайлов](https://github.com/defffis/dn-youtube-vot/issues/5) |
+| P1 | [#6 — Проверить PiP, фон, Bluetooth и внешнее воспроизведение](https://github.com/defffis/dn-youtube-vot/issues/6) |
+| P2 | [#7 — Исследовать авторизацию Яндекса и режим живых голосов](https://github.com/defffis/dn-youtube-vot/issues/7) |
