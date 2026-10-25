@@ -2,6 +2,10 @@
 #import "Runtime.hpp"
 
 static BOOL DNHook(Class cls, NSString *name, char result, const char *args, id (^factory)(IMP, SEL)) {
+    static NSMutableSet<NSString *> *installed;
+    if (!installed) installed = [NSMutableSet new];
+    NSString *key = [NSString stringWithFormat:@"%@/%@", NSStringFromClass(cls), name];
+    if ([installed containsObject:key]) return NO;
     SEL sel = NSSelectorFromString(name);
     Method method = class_getInstanceMethod(cls, sel);
     if (!method || method_getNumberOfArguments(method) != strlen(args) + 2) return NO;
@@ -17,35 +21,26 @@ static BOOL DNHook(Class cls, NSString *name, char result, const char *args, id 
     if (!class_addMethod(cls, sel, replacement, method_getTypeEncoding(method))) {
         class_replaceMethod(cls, sel, replacement, method_getTypeEncoding(method));
     }
+    [installed addObject:key];
     return YES;
 }
 static void DNObserve(id obj) {
     __weak id weak = obj;
-    dispatch_async(dispatch_get_main_queue(), ^{ if (weak) [DNVOTController.shared observePlayer:weak]; });
+    dispatch_async(dispatch_get_main_queue(), ^{
+        @try { if (weak) [DNVOTController.shared observePlayer:weak]; }
+        @catch (NSException *e) { NSLog(@"[DNVOT] observe failed: %@", e.reason); }
+    });
 }
 void DNVOTInstallHooks(void) {
-    static BOOL installed = NO;
-    if (installed) return;
     Class cls = NSClassFromString(@"YTPlayerViewController");
     if (!cls) return;
-    installed = YES;
     NSUInteger count = 0;
     count += DNHook(cls, @"viewDidAppear:", 'v', "B", ^id(IMP original, SEL sel) {
         return ^(id obj, BOOL animated) { ((void (*)(id, SEL, BOOL))original)(obj, sel, animated); DNObserve(obj); };
     });
-    count += DNHook(cls, @"loadView", 'v', "", ^id(IMP original, SEL sel) {
-        return ^(id obj) { ((void (*)(id, SEL))original)(obj, sel); DNObserve(obj); };
-    });
     count += DNHook(cls, @"playbackController:didActivateVideo:withPlaybackData:", 'v', "@@@", ^id(IMP original, SEL sel) {
         return ^(id obj, id controller, id video, id data) {
             ((void (*)(id, SEL, id, id, id))original)(obj, sel, controller, video, data); DNObserve(obj);
-        };
-    });
-    count += DNHook(cls, @"currentVideoID", '@', "", ^id(IMP original, SEL sel) {
-        return ^id(id obj) {
-            id value = ((id (*)(id, SEL))original)(obj, sel);
-            if (!NSThread.isMainThread || DNVOTController.shared.player != obj) DNObserve(obj);
-            return value;
         };
     });
     count += DNHook(cls, @"play", 'v', "", ^id(IMP original, SEL sel) {
@@ -73,11 +68,5 @@ void DNVOTInstallHooks(void) {
             ((void (*)(id, SEL, float))original)(obj, sel, actual);
         };
     });
-    NSLog(@"[DNVOT] 0.1.0-alpha loaded; native hooks: %lu; no third-party tweak dependency", (unsigned long)count);
-}
-__attribute__((constructor)) static void DNVOTLoad(void) {
-    if (![[NSBundle.mainBundle.executablePath lastPathComponent] isEqualToString:@"YouTube"]) return;
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [DNVOTController shared]; DNVOTInstallHooks();
-    });
+    if (count) NSLog(@"[DNVOT] 0.1.1-alpha installed %lu native hooks", (unsigned long)count);
 }

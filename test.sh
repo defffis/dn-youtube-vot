@@ -8,3 +8,4 @@ python3 tests/protobuf_parity.py
 export IOS_TOOLCHAIN_ROOT="${IOS_TOOLCHAIN_ROOT:-/opt/ios-toolchain}"
 source "$IOS_TOOLCHAIN_ROOT/env.sh"
 python3 tools/verify_macho.py build/DNYouTubeVOT.dylib > build/macho-verification.json
+python3 tools/verify_macho.py build/DNYouTubeVOTProbe.dylib > build/probe-verification.json

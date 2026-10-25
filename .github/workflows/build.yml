@@ -28,6 +28,8 @@ jobs:
           name: DNYouTubeVOT-arm64-ios
           path: |
             build/DNYouTubeVOT.dylib
+            build/DNYouTubeVOTProbe.dylib
+            build/probe-verification.json
             build/macho-verification.json
             build/dependencies.txt
           if-no-files-found: error

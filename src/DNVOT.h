@@ -36,3 +36,4 @@
 @end
 
 void DNVOTInstallHooks(void);
+NSString *DNVOTBootstrapDiagnostics(void);

@@ -61,7 +61,16 @@ static NSString *const DNUpdate = @"DNVoiceTranslationUpdated";
             if (!s.enabled) return;
             [s stop]; s.statusText = error;
         };
-        self.timer = [NSTimer timerWithTimeInterval:0.2 repeats:YES block:^(__unused NSTimer *timer) { [weakSelf tick]; }];
+        self.timer = [NSTimer timerWithTimeInterval:0.2 repeats:YES block:^(__unused NSTimer *timer) {
+            @try { [weakSelf tick]; }
+            @catch (NSException *e) {
+                NSLog(@"[DNVOT] tick exception: %@", e.reason);
+                [weakSelf.audio pause];
+                [weakSelf applyDucking:NO];
+                weakSelf.enabled = NO;
+                weakSelf.statusText = [@"Ошибка адаптера плеера: " stringByAppendingString:e.reason ?: e.name];
+            }
+        }];
         self.timer.tolerance = 0.03;
         [NSRunLoop.mainRunLoop addTimer:self.timer forMode:NSRunLoopCommonModes];
         [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(audioInterruption:) name:AVAudioSessionInterruptionNotification object:nil];
@@ -261,7 +270,15 @@ static NSString *const DNUpdate = @"DNVoiceTranslationUpdated";
 }
 - (void)showPanel {
     UIViewController *vc = [self.player isKindOfClass:UIViewController.class] ? self.player : nil;
-    if (!vc.view.window) return;
+    if (!vc.isViewLoaded || !vc.view.window) {
+        for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+            if (scene.activationState != UISceneActivationStateForegroundActive || ![scene isKindOfClass:UIWindowScene.class]) continue;
+            for (UIWindow *window in ((UIWindowScene *)scene).windows) {
+                if (window.isKeyWindow && !window.hidden && window.windowLevel == UIWindowLevelNormal) vc = window.rootViewController;
+            }
+        }
+    }
+    if (!vc.isViewLoaded || !vc.view.window) return;
     while (vc.presentedViewController) vc = vc.presentedViewController;
     if ([vc isKindOfClass:UINavigationController.class] && [((UINavigationController *)vc).topViewController isKindOfClass:DNVOTPanel.class]) return;
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:[DNVOTPanel new]];
@@ -271,7 +288,8 @@ static NSString *const DNUpdate = @"DNVoiceTranslationUpdated";
 }
 - (NSString *)diagnostics {
     id active = DNObject(self.player, @"activeVideo");
-    return [NSString stringWithFormat:@"DN YouTube Voice Translation 0.1.0-alpha\nYouTube: %@\niOS: %@\nPlayer: %@\nVideo: %@\nEnabled: %@\nStatus: %@\nPlayer state: %.0f\nContent time: %.3f\nRate: %.3f\nAudio state: %ld\nAudio time: %.3f\nAd: %.0f\nExternal playback: %.0f\nPartial translation: %@\nEngine: Yandex VOT / %@", [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"], UIDevice.currentDevice.systemVersion, NSStringFromClass([self.player class]), self.videoID ?: @"—", self.enabled ? @"YES" : @"NO", self.statusText, DNNumber(self.player, @"playerState", -1), DNNumber(self.player, @"contentVideoMediaTime", -1), DNNumber(DNObject(self.player, @"activePlaybackRateModel"), @"activeRate", -1), (long)self.audio.timeControlStatus, self.audio ? CMTimeGetSeconds(self.audio.currentTime) : 0, DNNumber(self.player, @"isPlayingAd"), DNNumber(active, @"isExternalPlaybackActive"), self.partial ? @"YES" : @"NO", @"26.10.0.1796"];
+    NSString *engine = [NSString stringWithFormat:@"DN YouTube Voice Translation 0.1.1-alpha\nYouTube: %@\niOS: %@\nPlayer: %@\nVideo: %@\nEnabled: %@\nStatus: %@\nPlayer state: %.0f\nContent time: %.3f\nRate: %.3f\nAudio state: %ld\nAudio time: %.3f\nAd: %.0f\nExternal playback: %.0f\nPartial translation: %@\nEngine: Yandex VOT / %@", [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"], UIDevice.currentDevice.systemVersion, NSStringFromClass([self.player class]), self.videoID ?: @"—", self.enabled ? @"YES" : @"NO", self.statusText, DNNumber(self.player, @"playerState", -1), DNNumber(self.player, @"contentVideoMediaTime", -1), DNNumber(DNObject(self.player, @"activePlaybackRateModel"), @"activeRate", -1), (long)self.audio.timeControlStatus, self.audio ? CMTimeGetSeconds(self.audio.currentTime) : 0, DNNumber(self.player, @"isPlayingAd"), DNNumber(active, @"isExternalPlaybackActive"), self.partial ? @"YES" : @"NO", @"26.10.0.1796"];
+    return [engine stringByAppendingFormat:@"\n%@", DNVOTBootstrapDiagnostics()];
 }
 @end
 
@@ -348,7 +366,7 @@ static NSString *const DNUpdate = @"DNVoiceTranslationUpdated";
     [self.action addTarget:self action:@selector(toggle) forControlEvents:UIControlEventTouchUpInside]; [self.stack addArrangedSubview:self.action];
     UIButton *diagnostics = [UIButton buttonWithType:UIButtonTypeSystem]; [diagnostics setTitle:@"Скопировать диагностику" forState:UIControlStateNormal];
     [diagnostics addTarget:self action:@selector(copyDiagnostics) forControlEvents:UIControlEventTouchUpInside]; [self.stack addArrangedSubview:diagnostics];
-    [self.stack addArrangedSubview:[self label:@"0.1.0-alpha · Независимый патч · Проверка на устройстве ещё требуется" detail:YES]];
+    [self.stack addArrangedSubview:[self label:@"0.1.1-alpha · Диагностическая сборка · Проверка на устройстве ещё требуется" detail:YES]];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(refresh) name:DNUpdate object:nil]; [self refresh];
 }
 - (void)dealloc { [NSNotificationCenter.defaultCenter removeObserver:self]; }
