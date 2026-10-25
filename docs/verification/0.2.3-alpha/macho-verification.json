@@ -1,7 +1,7 @@
 {
   "file": "DNYouTubeVOT.dylib",
-  "bytes": 421344,
-  "sha256": "7441e44984b2b34ecdcb5c99f78a0bd087a6a8e7134181bf54b2bddba7c9f6c3",
+  "bytes": 421424,
+  "sha256": "ee43b59d09ed40bf6015fc6763915f4498f2049edc190db93bca23e8d8a81cf9",
   "format": "Mach-O 64-bit dynamically linked shared library",
   "architecture": "arm64",
   "platform": "iOS device",
@@ -22,7 +22,7 @@
     "/System/Library/Frameworks/CoreMedia.framework/CoreMedia",
     "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics"
   ],
-  "uuid": "4C4C444B-5555-3144-A11F-26C2BC725CC6",
+  "uuid": "4C4C4478-5555-3144-A19D-17B94CAA5428",
   "constructors_checked": 1,
   "third_party_tweak_dependencies": [],
   "signature": "ad-hoc; SHA-256 code-page hashes verified",
