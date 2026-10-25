@@ -3,6 +3,7 @@
 #include "../src/ControlState.hpp"
 #include "../src/PlaybackClock.hpp"
 #include "../src/LocalTransport.hpp"
+#include "../src/FeaturePolicy.hpp"
 #include <cassert>
 #include <iostream>
 #include <limits>
@@ -15,6 +16,26 @@ static void reject(const dnvot::Bytes &b) {
 }
 int main(int argc, char **argv) {
     using namespace dnvot;
+    assert(sameVideo("", "")); // nil/nil must not create a stop every 200 ms
+    assert(!sameVideo("", "3BhO899BhyY"));
+    assert(languageCode("EN-us")=="en" && languageCode("ru.4")=="ru");
+    assert(languageCode("pt_BR")=="pt" && languageCode("zh-Hant-TW")=="zh");
+    assert(languageCode("und").empty() && languageCode("auto").empty());
+    assert(languageCode("a.en").empty() && languageCode("12").empty() && languageCode("").empty());
+    assert(autoAction(false,true,false,true,10)==AutoAction::wait);
+    assert(autoAction(true,true,true,true,0)==AutoAction::excluded);
+    assert(autoAction(true,true,false,true,0)==AutoAction::start);
+    assert(autoAction(true,false,false,true,4.99)==AutoAction::wait);
+    assert(autoAction(true,false,false,true,5)==AutoAction::unknown);
+    assert(autoAction(true,false,false,false,0)==AutoAction::start);
+    std::string media="https://vtrans.s3-private.mds.yandex.net/tts/prod/a%2Fb.mp3?sig=XYZ%2B1";
+    assert(translatedAudioRoute(media,0,"https://example.com")==media);
+    assert(translatedAudioRoute(media,1,"https://example.com")==media);
+    assert(translatedAudioRoute(media,2,"")==media);
+    assert(translatedAudioRoute(media,2,"https://example.com/base")=="https://example.com/base/video-translation/audio-proxy/a%2Fb.mp3?sig=XYZ%2B1");
+    std::string spoof="https://vtrans.s3-private.mds.yandex.net.evil/tts/prod/a";
+    assert(translatedAudioRoute(spoof,2,"https://example.com")==spoof);
+
     if (argc > 2) {
         Bytes b;
         std::string op = argv[1];
@@ -117,5 +138,5 @@ int main(int argc, char **argv) {
     d = sync(10, NAN, 0, 1, true, false, true, 100); assert(!d.audible);
     d = sync(10, 10, 0, INFINITY, true, false, true, 100); assert(!d.audible);
     d = sync(10, 10, 0, 0, true, false, true, 100); assert(!d.audible);
-    std::cout << "PASS: protobuf bounds, session, translation/help/audio fields, binary payload, lively voice, control idle/wait/armed/playing/disable, measured clock and stale pause recovery, local transport 400-step playback/seek, bounded restart, 0.5x/2x boundaries, pause, seek, rate, ads, buffering, partial coverage, offset, invalid clocks\n";
+    std::cout << "PASS: language normalization, auto exclusions/unknown timeout, proxy modes/prefix/query preservation, empty ID equality, protobuf bounds, session, translation/help/audio fields, binary payload, lively voice, control idle/wait/armed/playing/disable, measured clock and stale pause recovery, local transport 400-step playback/seek, bounded restart, 0.5x/2x boundaries, pause, seek, rate, ads, buffering, partial coverage, offset, invalid clocks\n";
 }

@@ -137,11 +137,8 @@ static BOOL DNBuildSettings(id manager) {
     if (!DNSignature(delegate,setter,'v',"@Q@@@B")) return NO;
     __weak UIViewController *vc=[delegate isKindOfClass:UIViewController.class] ? delegate : nil;
     NSMutableArray *items=[NSMutableArray new];
-    id playback=DNSettingItem(@"Озвучка и громкость", ^NSString *{return @"Языки, уровни звука, смещение, автоперевод";},^BOOL(__unused id cell,__unused NSUInteger index){[DNVOTController.shared showPanelFrom:vc];return YES;});
-    id account=DNSettingItem(@"Аккаунт Яндекса",^NSString *{return DNVOTPreferences.shared.authenticated ? DNVOTPreferences.shared.accountName : @"Войти · живые голоса";},^BOOL(__unused id cell,__unused NSUInteger index){UIViewController *parent=vc;if (parent.navigationController) [parent.navigationController pushViewController:[DNVOTAccountSettings new] animated:YES];else [DNVOTController.shared showPanelFrom:parent];return YES;});
-    id server=DNSettingItem(@"Сервер перевода",^NSString *{return DNVOTPreferences.shared.serverURL;},^BOOL(__unused id cell,__unused NSUInteger index){UIViewController *parent=vc;if (parent.navigationController) [parent.navigationController pushViewController:[DNVOTServiceSettings new] animated:YES];else [DNVOTController.shared showPanelFrom:parent];return YES;});
-    if (!playback || !account || !server) return NO;
-    [items addObjectsFromArray:@[playback,account,server]];
+    id settings=DNSettingItem(@"Настройки VOT", ^NSString *{return @"Звук, автоперевод, серверы, аккаунт и диагностика";},^BOOL(__unused id cell,__unused NSUInteger index){[DNVOTController.shared showPanelFrom:vc];return YES;});
+    if (!settings) return NO;[items addObject:settings];
     ((void(*)(id,SEL,id,NSUInteger,id,id,id,BOOL))objc_msgSend)(delegate,NSSelectorFromString(setter),items,DNCategory,@"VOT · Перевод видео",nil,nil,NO);
     DNSettingsBuilt++;return YES;
 }

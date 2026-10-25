@@ -1,6 +1,9 @@
 # Источники и уведомления
 
-Протокол изучен по открытым проектам voice-over-translation и vot.js.
+Разработано на основе исследования протокола и решений оригинального расширения
+[ilyhalight/voice-over-translation](https://github.com/ilyhalight/voice-over-translation)
+и [vot.js](https://github.com/ilyhalight/vot.js). Нативный код iOS реализован отдельно.
+Схемы modern/legacy Worker и переписывания Yandex audio/media URL сверены с ними.
 Зафиксированные commit SHA и лицензии перечислены в README и docs/ANALYSIS.md.
 Уведомления MIT исходных проектов сохранены в docs/LICENSE-*.txt.
 

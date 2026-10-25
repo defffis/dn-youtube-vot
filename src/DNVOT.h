@@ -24,6 +24,7 @@
 @property(nonatomic,copy) NSString *fromLanguage;
 @property(nonatomic,copy) NSString *toLanguage;
 @property(nonatomic) BOOL autoTranslate;
+@property(nonatomic,copy) NSSet<NSString *> *excludedLanguages;
 - (void)observePlayer:(id)player;
 - (void)playerPaused:(id)player;
 - (void)playerResumed:(id)player;
@@ -32,6 +33,10 @@
 - (void)stop;
 - (void)tick;
 - (void)saveSettings;
+- (void)autoSettingsChanged;
+- (void)clearCache;
+- (unsigned long long)cacheBytes;
+- (void)resetSettings;
 - (void)showPanel;
 - (void)showPanelFrom:(UIViewController *)presenter;
 - (void)toggleTranslation;

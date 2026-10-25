@@ -98,6 +98,7 @@ static NSString *DNSign(NSData *data) {
 @property(nonatomic,copy) NSString *transport;
 @property(nonatomic,copy) NSString *apiToken;
 @property(nonatomic) BOOL lively;
+@property(nonatomic) BOOL legacyWorker;
 @property(nonatomic,strong) NSMutableArray<NSString *> *trace;
 @property(nonatomic,copy) NSString *sourceFailure;
 @end
@@ -127,7 +128,7 @@ static NSString *DNSign(NSData *data) {
 }
 - (void)traceEvent:(NSString *)event { [DNFlightRecorder.shared event:@"vot_network" fields:@{@"summary":event}]; [self.trace addObject:event];if (self.trace.count>14) [self.trace removeObjectAtIndex:0]; }
 - (NSString *)diagnostics {
-    return [NSString stringWithFormat:@"Transport: %@\nServer: %@\nLively requested: %@\nSource URL available: %@\nSource itag: %ld\nSource failure: %@\nNetwork trace:\n%@",self.transport ?: @"—",self.host ?: @"—",self.lively ? @"YES" : @"NO",self.sourceURL ? @"YES" : @"NO",(long)self.itag,self.sourceFailure ?: @"—",[self.trace componentsJoinedByString:@"\n"]];
+    return [NSString stringWithFormat:@"Transport: %@\nServer: %@\nLively requested: %@\nSource URL available: %@\nSource itag: %ld\nSource failure: %@\nNetwork trace:\n%@",self.transport ?: @"—",self.host ?: @"—",self.lively ? @"YES" : @"NO",self.sourceURL ? @"YES" : @"NO",(long)self.itag,self.sourceFailure ?: @"—",[[self.trace componentsJoinedByString:@"\n"] stringByAppendingFormat:@"\nProxy mode: %ld\nWorker protocol: %@\nSource media proxy: %@",(long)DNVOTPreferences.shared.proxyMode,self.legacyWorker ? @"legacy JSON" : @"modern X-VOT-Headers",DNVOTPreferences.shared.mediaProxyURL.length ? @"configured" : @"off"]];
 }
 - (void)request:(NSString *)path body:(NSData *)body signedRequest:(BOOL)signedRequest method:(NSString *)method json:(BOOL)json completion:(void (^)(NSData *, NSString *))completion {
     NSUInteger generation = self.generation;
@@ -146,10 +147,19 @@ static NSString *DNSign(NSData *data) {
     }
     if (self.lively && [path isEqual:@"/video-translation/translate"] && self.apiToken.length) [request setValue:[@"OAuth " stringByAppendingString:self.apiToken] forHTTPHeaderField:@"Authorization"];
     if ([self.transport isEqual:@"worker"]) {
-        // VOTNextWorkerProvider format: binary body + base64 JSON upstream headers.
         NSDictionary *headers=request.allHTTPHeaderFields;
-        NSData *encoded=[NSJSONSerialization dataWithJSONObject:headers options:0 error:nil];
-        request.allHTTPHeaderFields=@{@"X-VOT-Headers":[encoded base64EncodedStringWithOptions:0],@"User-Agent":@"vot.js/3.2.0",@"Content-Type":json ? @"application/json" : @"application/x-protobuf"};
+        if (self.legacyWorker) {
+            if (body.length>8*1024*1024) { completion(nil,@"Legacy Worker: тело запроса больше 8 МБ. Используйте современный Worker.");return; }
+            id payload=nil;
+            if (json) payload=[NSJSONSerialization JSONObjectWithData:body options:NSJSONReadingFragmentsAllowed error:nil];
+            else { NSMutableArray *bytes=[NSMutableArray arrayWithCapacity:body.length];const uint8_t *p=(const uint8_t *)body.bytes;for (NSUInteger i=0;i<body.length;i++) [bytes addObject:@(p[i])];payload=bytes; }
+            if (!payload) { completion(nil,@"Не удалось сформировать запрос Legacy Worker");return; }
+            request.HTTPBody=[NSJSONSerialization dataWithJSONObject:@{@"headers":headers,@"body":payload} options:0 error:nil];
+            request.allHTTPHeaderFields=@{@"Content-Type":@"application/json",@"Accept":json ? @"application/json" : @"application/x-protobuf"};
+        } else {
+            NSData *encoded=[NSJSONSerialization dataWithJSONObject:headers options:0 error:nil];
+            request.allHTTPHeaderFields=@{@"X-VOT-Headers":[encoded base64EncodedStringWithOptions:0],@"User-Agent":@"vot.js/3.2.0",@"Content-Type":json ? @"application/json" : @"application/x-protobuf"};
+        }
     }
     [self traceEvent:[NSString stringWithFormat:@"%@ %@ bytes=%lu",method,path,(unsigned long)body.length]];
     __weak DNVOTClient *weakSelf = self;
@@ -192,9 +202,10 @@ static NSString *DNSign(NSData *data) {
 - (void)startVideo:(NSString *)videoID duration:(double)duration from:(NSString *)from to:(NSString *)to sourceAudio:(NSURL *)audioURL itag:(NSInteger)itag {
     [self cancel];
     DNVOTPreferences *prefs=DNVOTPreferences.shared;
-    self.host=[DNVOTPreferences normalizedServer:prefs.serverURL];self.transport=prefs.transport;
-    self.lively=prefs.lively;self.apiToken=nil;self.secret=nil;self.sessionExpiry=0;
+    self.host=[DNVOTPreferences normalizedServer:prefs.proxyMode>0 ? prefs.workerURL : prefs.serverURL];self.transport=prefs.transport;self.legacyWorker=prefs.legacyWorker;
+    self.lively=prefs.lively && prefs.proxyMode==0 && [self.host isEqual:@"https://api.browser.yandex.ru"];self.apiToken=nil;self.secret=nil;self.sessionExpiry=0;
     [self.trace removeAllObjects];self.sourceFailure=nil;
+    if (prefs.lively && !self.lively) [self traceEvent:@"standard voice for selected route; no OAuth forwarded"];
     if (!self.host) {if (self.failed) self.failed(@"Некорректный HTTPS-сервер VOT");return;}
     if (self.lively) {
         if (![self.host isEqual:@"https://api.browser.yandex.ru"] || ![self.transport isEqual:@"direct"]) {if (self.failed) self.failed(@"Для живых голосов выберите «Яндекс напрямую». OAuth не отправляется стороннему серверу.");return;}
@@ -327,6 +338,6 @@ static NSString *DNSign(NSData *data) {
         if (strong.status) strong.status(@"Передача аудио сервису перевода…");
         [strong uploadAudio:audio translation:translationID fallback:NO];
     };
-    [self.download start:self.sourceURL];
+    [self.download start:[DNVOTPreferences.shared sourceMediaURL:self.sourceURL]];
 }
 @end
