@@ -1,5 +1,6 @@
 #import "DNVOT.h"
 #import "Preferences.h"
+#import "FlightRecorder.h"
 #import <CommonCrypto/CommonHMAC.h>
 #include "VOTWire.hpp"
 #include <algorithm>
@@ -124,7 +125,7 @@ static NSString *DNSign(NSData *data) {
     [self.tasks removeAllObjects];
     [self.download cancel]; self.download = nil;
 }
-- (void)traceEvent:(NSString *)event { [self.trace addObject:event];if (self.trace.count>14) [self.trace removeObjectAtIndex:0]; }
+- (void)traceEvent:(NSString *)event { [DNFlightRecorder.shared event:@"vot_network" fields:@{@"summary":event}]; [self.trace addObject:event];if (self.trace.count>14) [self.trace removeObjectAtIndex:0]; }
 - (NSString *)diagnostics {
     return [NSString stringWithFormat:@"Transport: %@\nServer: %@\nLively requested: %@\nSource URL available: %@\nSource itag: %ld\nSource failure: %@\nNetwork trace:\n%@",self.transport ?: @"—",self.host ?: @"—",self.lively ? @"YES" : @"NO",self.sourceURL ? @"YES" : @"NO",(long)self.itag,self.sourceFailure ?: @"—",[self.trace componentsJoinedByString:@"\n"]];
 }

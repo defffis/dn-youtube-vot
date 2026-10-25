@@ -1,9 +1,12 @@
 #import "DNVOT.h"
 #import "Runtime.hpp"
 #import "Preferences.h"
+#import "FlightRecorder.h"
+#import "LocalAudio.h"
 #include "SyncPolicy.hpp"
 #include "ControlState.hpp"
 #include "PlaybackClock.hpp"
+#include "LocalTransport.hpp"
 #include <algorithm>
 
 static NSString *const DNSettings = @"DNVoiceTranslation.v1";
@@ -11,9 +14,19 @@ static NSString *const DNUpdate = @"DNVoiceTranslationUpdated";
 @interface DNVOTPanel : UIViewController
 @end
 
-@interface DNVOTController ()
+@interface DNVOTController () <AVAudioPlayerDelegate>
 @property(nonatomic,strong) DNVOTClient *client;
-@property(nonatomic,strong) AVPlayer *audio;
+@property(nonatomic,strong) AVAudioPlayer *audio;
+@property(nonatomic,strong) DNLocalAudioDownload *download;
+@property(nonatomic,strong) NSURL *audioFile;
+@property(nonatomic) int64_t downloadedBytes;
+@property(nonatomic) int64_t expectedBytes;
+@property(nonatomic) NSUInteger seekCommands;
+@property(nonatomic) BOOL lastPlaySucceeded;
+@property(nonatomic) double lastPlayAttempt;
+@property(nonatomic) double lastAudioTime;
+@property(nonatomic) double audioAdvanceAt;
+@property(nonatomic,copy) NSString *audioError;
 @property(nonatomic) NSTimeInterval requestStarted;
 @property(nonatomic,strong) NSTimer *timer;
 @property(nonatomic,strong) NSCache<NSString *, NSURL *> *cache;
@@ -52,6 +65,10 @@ static NSString *const DNUpdate = @"DNVoiceTranslationUpdated";
         self.offset = std::clamp(self.offset, -5.0, 5.0);
         _clock.reset(); self.playbackGate = @"disabled"; self.statusText = @"Откройте видео и включите перевод";
         self.cache = [NSCache new]; self.cache.countLimit = 20;
+        // Remove our abandoned temporary audio after a previous process crash.
+        for (NSString *name in [NSFileManager.defaultManager contentsOfDirectoryAtPath:NSTemporaryDirectory() error:nil]) {
+            if ([name hasPrefix:@"DNVOT-audio-"] && [name hasSuffix:@".mp3"]) [NSFileManager.defaultManager removeItemAtPath:[NSTemporaryDirectory() stringByAppendingPathComponent:name] error:nil];
+        }
         self.client = [DNVOTClient new];
         __weak DNVOTController *weakSelf = self;
         self.client.status = ^(NSString *status) { DNVOTController *s = weakSelf; if (s.enabled) s.statusText = status; };
@@ -59,7 +76,7 @@ static NSString *const DNUpdate = @"DNVoiceTranslationUpdated";
             DNVOTController *s = weakSelf;
             if (!s.enabled || !s.activeKey.length) return;
             if (!partial) [s.cache setObject:url forKey:s.activeKey];
-            s.working = NO; [s loadAudio:url partial:partial];
+            [s loadAudio:url partial:partial];
         };
         self.client.failed = ^(NSString *error) {
             DNVOTController *s = weakSelf;
@@ -79,9 +96,15 @@ static NSString *const DNUpdate = @"DNVoiceTranslationUpdated";
         self.timer.tolerance = 0.03;
         [NSRunLoop.mainRunLoop addTimer:self.timer forMode:NSRunLoopCommonModes];
         [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(audioInterruption:) name:AVAudioSessionInterruptionNotification object:nil];
+        [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(audioRouteChanged:) name:AVAudioSessionRouteChangeNotification object:nil];
+        for (NSString *name in @[UIApplicationDidEnterBackgroundNotification,UIApplicationWillEnterForegroundNotification,UIApplicationWillResignActiveNotification,UIApplicationDidBecomeActiveNotification]) {
+            [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(appLifecycle:) name:name object:nil];
+        }
+        [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(mediaReset:) name:AVAudioSessionMediaServicesWereResetNotification object:nil];
     }
     return self;
 }
+- (void)record:(NSString *)event fields:(NSDictionary *)fields { [DNFlightRecorder.shared event:event fields:fields]; }
 - (void)setStatusText:(NSString *)statusText {
     _statusText = [statusText copy];
     [self updateButton];
@@ -95,8 +118,8 @@ static NSString *const DNUpdate = @"DNVoiceTranslationUpdated";
 - (void)updateButton { DNVOTUpdateNativeButtons(); }
 - (void)toggleTranslation { if (self.enabled) [self stop]; else [self start]; }
 - (void)updateControlsButton:(UIButton *)button {
-    BOOL ready = self.enabled && self.audio.currentItem.status == AVPlayerItemStatusReadyToPlay && self.audio;
-    BOOL playing = ready && !self.seeking && self.audio.timeControlStatus == AVPlayerTimeControlStatusPlaying && self.audio.rate > 0 && self.translationLevel > 0 && !self.audio.muted;
+    BOOL ready = self.enabled && self.audio != nil;
+    BOOL playing = ready && self.audio.playing && self.translationLevel > 0;
     auto state = dnvot::controlState(self.enabled, ready, playing, self.requestStarted, NSProcessInfo.processInfo.systemUptime);
     BOOL waiting = state.phase == dnvot::ControlPhase::waiting;
     NSString *title = nil;
@@ -142,9 +165,10 @@ static NSString *const DNUpdate = @"DNVoiceTranslationUpdated";
 - (void)mountButton { DNVOTUpdateNativeButtons(); }
 - (void)playerPaused:(id)player {
     if (self.player != player) return;
+    [self record:@"native_pause" fields:@{@"content":@(DNNumber(player,@"contentVideoMediaTime",-1))}];
     _clock.pause(NSProcessInfo.processInfo.systemUptime); self.playbackGate = @"video pause callback"; [self.audio pause]; [self applyDucking:NO];
 }
-- (void)playerResumed:(id)player { if (self.player == player) _clock.resume(); }
+- (void)playerResumed:(id)player { if (self.player == player) { _clock.resume(); self.lastPlayAttempt=-INFINITY; [self record:@"native_resume" fields:@{}]; } }
 - (float)incomingVolume:(float)volume player:(id)player {
     if (self.player != player || self.settingVolume || !self.enabled) return volume;
     self.savedVolume = volume; self.capturedVolume = YES;
@@ -164,8 +188,10 @@ static NSString *const DNUpdate = @"DNVoiceTranslationUpdated";
     self.settingVolume = NO;
 }
 - (void)stop {
-    self.generation++; [self.client cancel]; [self.audio pause];
+    [self record:@"translation_stop" fields:@{}];
+    self.generation++; [self.client cancel]; [self.download cancel]; self.download=nil; [self.audio stop];
     [self applyDucking:NO]; self.audio = nil; self.enabled = NO; self.working = NO;
+    if (self.audioFile) [NSFileManager.defaultManager removeItemAtURL:self.audioFile error:nil]; self.audioFile=nil;
     self.capturedVolume = NO; self.seeking = NO; self.activeKey = nil; self.playbackGate = @"disabled";
     self.statusText = @"Перевод выключен";
 }
@@ -195,27 +221,65 @@ static NSString *const DNUpdate = @"DNVoiceTranslationUpdated";
     }
     [self stop]; self.videoID = videoID; self.enabled = YES; self.working = YES;
     self.requestStarted = NSProcessInfo.processInfo.systemUptime;
+    self.playCommands=0;self.seekCommands=0;self.audioError=nil;
+    [self record:@"translation_start" fields:@{@"video":videoID,@"source":self.fromLanguage,@"target":self.toLanguage}];
     self.activeKey = [self cacheKey];
     self.savedVolume = (float)DNNumber(self.player, @"volume", 1); self.capturedVolume = YES;
     NSURL *cached = [self.cache objectForKey:self.activeKey];
-    if (cached) { self.working = NO; [self loadAudio:cached partial:NO]; self.statusText = @"Перевод загружен из кеша текущего сеанса"; return; }
+    if (cached) { [self loadAudio:cached partial:NO]; return; }
     NSInteger itag = 140; NSURL *source = [self sourceAudioWithItag:&itag];
     [self.client startVideo:videoID duration:duration from:self.fromLanguage to:self.toLanguage sourceAudio:source itag:itag];
 }
 - (void)loadAudio:(NSURL *)url partial:(BOOL)partial {
-    self.generation++; self.seeking = NO; self.partial = partial;
-    [self.audio pause]; [self applyDucking:NO];
-    AVPlayerItem *item = [AVPlayerItem playerItemWithURL:url];
-    item.audioTimePitchAlgorithm = AVAudioTimePitchAlgorithmSpectral;
-    item.preferredForwardBufferDuration = 15;
-    self.audio = [AVPlayer playerWithPlayerItem:item]; self.audio.volume = self.translationLevel;
-    self.audio.automaticallyWaitsToMinimizeStalling = NO;
-    self.playbackGate = @"loading translated audio";
+    self.generation++; self.seeking=NO;self.partial=partial;self.working=YES;
+    [self.download cancel];[self.audio stop];[self applyDucking:NO];self.audio=nil;
+    if (self.audioFile) [NSFileManager.defaultManager removeItemAtURL:self.audioFile error:nil];self.audioFile=nil;
+    self.downloadedBytes=0;self.expectedBytes=0;
+    self.playbackGate=@"downloading complete translated file";
+    self.statusText=@"Загрузка файла озвучки…";
+    NSUInteger generation=self.generation;
+    __weak DNVOTController *weakSelf=self;
+    DNLocalAudioDownload *download=[DNLocalAudioDownload new];self.download=download;
+    download.progress=^(int64_t total,int64_t expected) {
+        DNVOTController *s=weakSelf;if (!s || generation!=s.generation) return;
+        s.downloadedBytes=total;s.expectedBytes=expected;
+    };
+    download.completion=^(NSURL *local,NSString *errorText) {
+        DNVOTController *s=weakSelf;
+        if (!s || generation!=s.generation || !s.enabled) { if (local) [NSFileManager.defaultManager removeItemAtURL:local error:nil];return; }
+        s.download=nil;s.working=NO;
+        if (!local) { if (s.activeKey) [s.cache removeObjectForKey:s.activeKey];[s stop];s.statusText=errorText ?: @"Не удалось загрузить озвучку";return; }
+        s.audioFile=local;
+        NSError *error=nil;
+        AVAudioPlayer *audio=[[AVAudioPlayer alloc] initWithContentsOfURL:local error:&error];
+        audio.enableRate=YES;audio.meteringEnabled=DNFlightRecorder.shared.recording;audio.delegate=s;audio.volume=s.translationLevel;
+        BOOL prepared=audio && [audio prepareToPlay];
+        [s record:@"audio_prepare" fields:@{@"ok":@(prepared),@"duration":@(audio.duration),@"channels":@(audio.numberOfChannels),@"sample_rate":@(audio.format.sampleRate),@"error_domain":error.domain ?: @"",@"error_code":@(error.code)}];
+        if (!prepared) {
+            [s stop];s.audioError=[NSString stringWithFormat:@"%@/%ld",error.domain ?: @"prepare",(long)error.code];s.statusText=@"Не удалось декодировать файл озвучки. Экспортируйте лог.";return;
+        }
+        s.audio=audio;s.lastAudioTime=NAN;s.audioAdvanceAt=0;s.lastPlayAttempt=-INFINITY;
+        s.playbackGate=@"local audio ready";s.statusText=@"Озвучка загружена, ожидание воспроизведения видео";
+        [s tick];
+    };
+    [download start:url];
+}
+- (void)audioPlayerDecodeErrorDidOccur:(AVAudioPlayer *)player error:(NSError *)error {
+    if (player!=self.audio) return;
+    self.audioError=[NSString stringWithFormat:@"%@/%ld",error.domain ?: @"decode",(long)error.code];
+    [self record:@"audio_decode_error" fields:@{@"domain":error.domain ?: @"",@"code":@(error.code)}];
+    [self stop];self.statusText=@"Ошибка декодирования озвучки. Экспортируйте лог.";
+}
+- (void)audioPlayerDidFinishPlaying:(AVAudioPlayer *)player successfully:(BOOL)flag {
+    if (player!=self.audio) return;
+    [self record:@"audio_finished" fields:@{@"success":@(flag),@"time":@(player.currentTime)}];
+    [self applyDucking:NO];self.playbackGate=@"translated audio finished";[self updateButton];
 }
 - (void)tick {
     id player = self.player;
     if (!player) {
         if (self.enabled) [self stop];
+        [self recordSample];
         DNVOTUpdateNativeButtons(); return;
     }
     NSString *videoID = [self currentID];
@@ -227,13 +291,8 @@ static NSString *const DNUpdate = @"DNVoiceTranslationUpdated";
             dispatch_async(dispatch_get_main_queue(), ^{ if (generation == self.generation && [self.videoID isEqualToString:videoID]) [self start]; });
         }
     }
-    self.tickCount++; [self mountButton];
-    if (!self.enabled || !self.audio) return;
-    AVPlayerItem *item = self.audio.currentItem;
-    if (item.status == AVPlayerItemStatusFailed) {
-        if (self.activeKey) [self.cache removeObjectForKey:self.activeKey];
-        [self stop]; self.statusText = @"Не удалось воспроизвести перевод. Включите перевод повторно для обновления ссылки."; return;
-    }
+    self.tickCount++;
+    if (!self.enabled || !self.audio) { [self recordSample];[self mountButton];return; }
     double time = DNNumber(player, @"contentVideoMediaTime", NAN);
     if (!std::isfinite(time)) time = DNNumber(player, @"currentVideoMediaTime", NAN);
     double now = NSProcessInfo.processInfo.systemUptime;
@@ -243,43 +302,63 @@ static NSString *const DNUpdate = @"DNVoiceTranslationUpdated";
     BOOL blocked = DNNumber(player, @"isPlayingAd") || DNNumber(player, @"isPlayingAdSurvey") || DNNumber(player, @"isPlayingAdIntro") || DNNumber(active, @"isExternalPlaybackActive") || DNNumber(player, @"isMDXActive");
     id rateModel = DNObject(player, @"activePlaybackRateModel");
     float rate = (float)DNNumber(rateModel, @"activeRate", 1);
-    double audioTime = CMTimeGetSeconds(self.audio.currentTime);
+    double audioTime = self.audio.currentTime;
     if (!std::isfinite(audioTime)) audioTime = 0;
-    double duration = CMTimeGetSeconds(item.duration);
-    auto decision = dnvot::sync(time, audioTime, self.offset, rate, moving, blocked,
-                               item.status == AVPlayerItemStatusReadyToPlay, duration);
-    self.playbackGate = @"play requested";
-    if (blocked) self.playbackGate = @"ad or external playback";
-    else if (item.status != AVPlayerItemStatusReadyToPlay) self.playbackGate = @"audio item not ready";
-    else if (!std::isfinite(time)) self.playbackGate = @"invalid content clock";
-    else if (!moving) self.playbackGate = _clock.paused ? @"video paused" : @"content clock not advancing";
-    else if (!decision.audible) self.playbackGate = @"outside translated audio coverage or invalid playback rate";
-    if (self.seeking) self.playbackGate = @"seek in progress";
-    if (!decision.audible || self.seeking) { [self.audio pause]; [self applyDucking:NO]; }
-    if (!self.seeking && decision.seek && !blocked && item.status == AVPlayerItemStatusReadyToPlay) {
-        self.seeking = YES; self.playbackGate = @"seeking to content clock"; [self.audio pause]; [self applyDucking:NO];
-        NSUInteger generation = self.generation;
-        __weak DNVOTController *weakSelf = self;
-        [self.audio seekToTime:CMTimeMakeWithSeconds(decision.target, 600) toleranceBefore:CMTimeMakeWithSeconds(0.035, 600) toleranceAfter:CMTimeMakeWithSeconds(0.035, 600) completionHandler:^(__unused BOOL finished) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                DNVOTController *s = weakSelf;
-                if (s && generation == s.generation) {
-                    s.seeking = NO;
-                    @try { [s tick]; }
-                    @catch (__unused NSException *e) { s.playbackGate = @"seek resume adapter exception"; [s.audio pause]; [s applyDucking:NO]; }
-                }
-            });
-        }]; return;
+    double duration = self.audio.duration;
+    auto transport=dnvot::localTransport(time,audioTime,self.offset,rate,moving,blocked,duration,self.audio.playing,now,self.lastPlayAttempt);
+    auto decision=transport.sync;
+    self.playbackGate=@"local audio ready";
+    if (blocked) self.playbackGate=@"ad or external playback";
+    else if (!std::isfinite(time)) self.playbackGate=@"invalid content clock";
+    else if (!transport.supported) self.playbackGate=@"local audio supports video rates 0.5 to 2.0";
+    else if (!moving) self.playbackGate=_clock.paused ? @"video paused" : @"content clock not advancing";
+    else if (!decision.audible) self.playbackGate=@"outside translated audio coverage or invalid rate";
+    if (!decision.audible) {
+        if (self.audio.playing) { [self.audio pause];[self record:@"audio_pause_gate" fields:@{@"gate":self.playbackGate}]; }
+        [self applyDucking:NO];
     }
-    if (decision.audible && !self.seeking) {
-        if (self.audio.timeControlStatus != AVPlayerTimeControlStatusPlaying || fabsf(self.audio.rate - decision.rate) > 0.005f) {
-            self.playCommands++; [self.audio playImmediatelyAtRate:decision.rate];
+    // Local seeks are synchronous; never pause or recursively re-enter tick for a seek.
+    if (decision.seek) {
+        self.audio.currentTime=decision.target;self.seekCommands++;
+        [self record:@"audio_seek" fields:@{@"target":@(decision.target),@"before":@(audioTime),@"after":@(self.audio.currentTime)}];
+    }
+    if (decision.audible) {
+        if (fabsf(self.audio.rate-decision.rate)>0.005f) self.audio.rate=decision.rate;
+        if (transport.play) {
+            self.lastPlayAttempt=now;self.playCommands++;self.lastPlaySucceeded=[self.audio play];
+            [self record:@"audio_play" fields:@{@"ok":@(self.lastPlaySucceeded),@"time":@(self.audio.currentTime),@"rate":@(self.audio.rate)}];
         }
-        self.playbackGate = self.audio.timeControlStatus == AVPlayerTimeControlStatusPlaying ? @"playing" : @"play requested; waiting for buffered audio";
-        [self applyDucking:self.audio.timeControlStatus == AVPlayerTimeControlStatusPlaying && self.translationLevel > 0 && !self.audio.muted];
+        self.playbackGate=self.audio.playing ? @"playing local file" : @"local audio play failed or stopped";
+        [self applyDucking:self.audio.playing && self.translationLevel>0];
     }
+    [self recordSample];[self mountButton];
+}
+- (NSDictionary *)sessionFields {
+    AVAudioSession *session=AVAudioSession.sharedInstance;
+    NSMutableArray *outputs=[NSMutableArray new];
+    for (AVAudioSessionPortDescription *port in session.currentRoute.outputs) [outputs addObject:port.portType];
+    return @{@"category":session.category ?: @"",@"mode":session.mode ?: @"",@"options":@(session.categoryOptions),@"outputs":outputs,@"system_volume":@(session.outputVolume),@"sample_rate":@(session.sampleRate),@"output_channels":@(session.outputNumberOfChannels),@"other_audio":@(session.otherAudioPlaying),@"silence_hint":@(session.secondaryAudioShouldBeSilencedHint)};
+}
+- (void)recordSample {
+    if (!DNFlightRecorder.shared.recording) { self.audio.meteringEnabled=NO;return; }
+    self.audio.meteringEnabled=YES;[self.audio updateMeters];
+    double audioTime=self.audio.currentTime;double now=NSProcessInfo.processInfo.systemUptime;
+    if (std::isfinite(self.lastAudioTime) && audioTime>self.lastAudioTime+0.002 && audioTime-self.lastAudioTime<1.5) self.audioAdvanceAt=now;
+    self.lastAudioTime=audioTime;
+    NSMutableArray *meters=[NSMutableArray new];
+    for (NSUInteger i=0;i<MIN(self.audio.numberOfChannels,8u);i++) [meters addObject:@{@"average_dbfs":@([self.audio averagePowerForChannel:i]),@"peak_dbfs":@([self.audio peakPowerForChannel:i])}];
+    [self record:@"sample" fields:@{@"video":self.videoID ?: @"",@"video_time":@(DNNumber(self.player,@"contentVideoMediaTime",-1)),@"video_state":@(DNNumber(self.player,@"playerState",-1)),@"moving":@(self.clockMoving),@"paused":@(_clock.paused),@"gate":self.playbackGate ?: @"",@"enabled":@(self.enabled),@"backend":@"AVAudioPlayer/local",@"audio_time":@(audioTime),@"audio_playing":@(self.audio.playing),@"audio_rate":@(self.audio.rate),@"audio_volume":@(self.audio.volume),@"duration":@(self.audio.duration),@"audio_clock_age":@(self.audioAdvanceAt ? now-self.audioAdvanceAt : -1),@"meters":meters,@"original_volume":@(DNNumber(self.player,@"volume",-1)),@"saved_volume":@(self.savedVolume),@"ducking":@(self.ducking),@"play_commands":@(self.playCommands),@"seek_commands":@(self.seekCommands),@"downloaded":@(self.downloadedBytes),@"expected":@(self.expectedBytes),@"app_state":@(UIApplication.sharedApplication.applicationState),@"session":[self sessionFields]}];
+}
+- (void)audioRouteChanged:(NSNotification *)notification {
+    [self record:@"route_change" fields:@{@"reason":notification.userInfo[AVAudioSessionRouteChangeReasonKey] ?: @0,@"session":[self sessionFields]}];
+}
+- (void)appLifecycle:(NSNotification *)notification { [self record:@"app_lifecycle" fields:@{@"name":notification.name}]; }
+- (void)mediaReset:(__unused NSNotification *)notification {
+    [self record:@"audio_media_services_reset" fields:@{}];
+    if (self.enabled) { [self stop];self.statusText=@"Аудиосистема перезапущена. Включите перевод повторно."; }
 }
 - (void)audioInterruption:(NSNotification *)notification {
+    [self record:@"audio_interruption" fields:@{@"type":notification.userInfo[AVAudioSessionInterruptionTypeKey] ?: @0,@"options":notification.userInfo[AVAudioSessionInterruptionOptionKey] ?: @0}];
     if ([notification.userInfo[AVAudioSessionInterruptionTypeKey] unsignedIntegerValue] == AVAudioSessionInterruptionTypeBegan) {
         [self.audio pause]; _clock.pause(NSProcessInfo.processInfo.systemUptime); self.playbackGate = @"audio interruption"; [self applyDucking:NO];
     }
@@ -307,11 +386,7 @@ static NSString *const DNUpdate = @"DNVoiceTranslationUpdated";
     [vc presentViewController:nav animated:YES completion:nil];
 }
 - (NSString *)diagnostics {
-    id active = DNObject(self.player, @"activeVideo");
-    NSString *engine = [NSString stringWithFormat:@"DN YouTube Voice Translation 0.2.2-alpha\nYouTube: %@\niOS: %@\nPlayer: %@\nVideo: %@\nEnabled: %@\nStatus: %@\nPlayer state: %.0f\nContent time: %.3f\nRate: %.3f\nAudio state: %ld\nAudio time: %.3f\nAd: %.0f\nExternal playback: %.0f\nPartial translation: %@\nEngine: Yandex VOT / %@", [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"], UIDevice.currentDevice.systemVersion, NSStringFromClass([self.player class]), self.videoID ?: @"—", self.enabled ? @"YES" : @"NO", self.statusText, DNNumber(self.player, @"playerState", -1), DNNumber(self.player, @"contentVideoMediaTime", -1), DNNumber(DNObject(self.player, @"activePlaybackRateModel"), @"activeRate", -1), (long)self.audio.timeControlStatus, self.audio ? CMTimeGetSeconds(self.audio.currentTime) : 0, DNNumber(self.player, @"isPlayingAd"), DNNumber(active, @"isExternalPlaybackActive"), self.partial ? @"YES" : @"NO", @"26.10.0.1796"];
-    NSString *playback = [NSString stringWithFormat:@"Audio item status: %ld\nAudio rate: %.3f\nAudio waiting reason: %@\nSync user paused: %@\nSync seeking: %@\nSync advance age: %.3f", (long)self.audio.currentItem.status, self.audio.rate, self.audio.reasonForWaitingToPlay ?: @"—", _clock.paused ? @"YES" : @"NO", self.seeking ? @"YES" : @"NO", NSProcessInfo.processInfo.systemUptime-_clock.lastAdvance];
-    NSString *transport = [NSString stringWithFormat:@"Playback gate: %@\nContent clock moving: %@\nNative attemptingToPlay (diagnostic only): %.0f\nPlay commands: %lu\nTranslation duration: %.3f\nTranslation volume: %.3f\nTranslation muted: %@\nOriginal volume: %.3f\nOriginal saved volume: %.3f\nOriginal level: %.3f\nDucking: %@\nLast volume setter succeeded: %@\nAd survey: %.0f\nAd intro: %.0f\nMDX: %.0f", self.playbackGate ?: @"—", self.clockMoving ? @"YES" : @"NO", DNNumber(active, @"attemptingToPlay", -1), (unsigned long)self.playCommands, self.audio ? CMTimeGetSeconds(self.audio.currentItem.duration) : 0, self.audio.volume, self.audio.muted ? @"YES" : @"NO", DNNumber(self.player, @"volume", -1), self.savedVolume, self.originalLevel, self.ducking ? @"YES" : @"NO", self.volumeApplied ? @"YES" : @"NO", DNNumber(self.player, @"isPlayingAdSurvey"), DNNumber(self.player, @"isPlayingAdIntro"), DNNumber(self.player, @"isMDXActive")];
-    return [engine stringByAppendingFormat:@"\n%@\n%@\n%@\n%@\n%@", DNVOTBootstrapDiagnostics(), DNVOTNativeDiagnostics(), playback, transport, [self.client diagnostics]];
+    return [NSString stringWithFormat:@"DN YouTube Voice Translation 0.2.3-alpha\nYouTube: %@\niOS: %@\nVideo: %@\nEnabled: %@\nStatus: %@\nBackend: AVAudioPlayer / complete local file\nPlayback gate: %@\nContent time: %.3f\nContent clock moving: %@\nSync user paused: %@\nAudio playing: %@\nAudio time: %.3f\nAudio duration: %.3f\nAudio rate: %.3f\nAudio channels: %lu\nTranslation volume: %.3f\nOriginal volume: %.3f\nOriginal saved volume: %.3f\nOriginal level: %.3f\nDucking: %@\nLast volume setter succeeded: %@\nPlay commands: %lu\nSeek commands: %lu\nLast play succeeded: %@\nAudio error: %@\nDownloaded bytes: %lld / %lld\nRecorder: %@\nSession: %@\n%@\n%@\n%@", [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"],UIDevice.currentDevice.systemVersion,self.videoID ?: @"—",self.enabled ? @"YES" : @"NO",self.statusText,self.playbackGate,DNNumber(self.player,@"contentVideoMediaTime",-1),self.clockMoving ? @"YES" : @"NO",_clock.paused ? @"YES" : @"NO",self.audio.playing ? @"YES" : @"NO",self.audio.currentTime,self.audio.duration,self.audio.rate,(unsigned long)self.audio.numberOfChannels,self.audio.volume,DNNumber(self.player,@"volume",-1),self.savedVolume,self.originalLevel,self.ducking ? @"YES" : @"NO",self.volumeApplied ? @"YES" : @"NO",(unsigned long)self.playCommands,(unsigned long)self.seekCommands,self.lastPlaySucceeded ? @"YES" : @"NO",self.audioError ?: @"—",(long long)self.downloadedBytes,(long long)self.expectedBytes,DNFlightRecorder.shared.state,[self sessionFields],DNVOTBootstrapDiagnostics(),DNVOTNativeDiagnostics(),[self.client diagnostics]];
 }
 @end
 
@@ -320,6 +395,10 @@ static NSString *const DNUpdate = @"DNVoiceTranslationUpdated";
 @property(nonatomic,strong) UILabel *offsetLabel;
 @property(nonatomic,strong) UIButton *action;
 @property(nonatomic,strong) UIStackView *stack;
+@property(nonatomic,strong) UIButton *logStart;
+@property(nonatomic,strong) UIButton *logStop;
+@property(nonatomic,strong) UILabel *logStatus;
+@property(nonatomic,strong) NSTimer *refreshTimer;
 @end
 @implementation DNVOTPanel
 - (UILabel *)label:(NSString *)text detail:(BOOL)detail {
@@ -396,12 +475,27 @@ static NSString *const DNUpdate = @"DNVoiceTranslationUpdated";
     [self.action addTarget:self action:@selector(toggle) forControlEvents:UIControlEventTouchUpInside]; [self.stack addArrangedSubview:self.action];
     UIButton *diagnostics = [UIButton buttonWithType:UIButtonTypeSystem]; [diagnostics setTitle:@"Скопировать диагностику" forState:UIControlStateNormal];
     [diagnostics addTarget:self action:@selector(copyDiagnostics) forControlEvents:UIControlEventTouchUpInside]; [self.stack addArrangedSubview:diagnostics];
-    [self.stack addArrangedSubview:[self label:@"0.2.2-alpha · Диагностическая сборка · Проверка на устройстве ещё требуется" detail:YES]];
+    [self.stack addArrangedSubview:[self label:@"Подробный лог" detail:NO]];
+    self.logStatus=[self label:@"" detail:YES];[self.stack addArrangedSubview:self.logStatus];
+    self.logStart=[UIButton buttonWithType:UIButtonTypeSystem];[self.logStart setTitle:@"Начать запись лога" forState:UIControlStateNormal];
+    [self.logStart addTarget:self action:@selector(startLog) forControlEvents:UIControlEventTouchUpInside];[self.stack addArrangedSubview:self.logStart];
+    self.logStop=[UIButton buttonWithType:UIButtonTypeSystem];[self.logStop setTitle:@"Остановить запись лога" forState:UIControlStateNormal];
+    [self.logStop addTarget:self action:@selector(stopLog) forControlEvents:UIControlEventTouchUpInside];[self.stack addArrangedSubview:self.logStop];
+    UIButton *exportButton=[UIButton buttonWithType:UIButtonTypeSystem];[exportButton setTitle:@"Экспортировать лог файлом" forState:UIControlStateNormal];
+    [exportButton addTarget:self action:@selector(exportLog:) forControlEvents:UIControlEventTouchUpInside];[self.stack addArrangedSubview:exportButton];
+    [self.stack addArrangedSubview:[self label:@"Запись продолжается после закрытия настроек, пока YouTube выполняется. Лимит: 15 минут / 12 МБ. В файле есть ID видео и технические события; токены, ссылки на аудио, аккаунт и само аудио не записываются. Экспорт открывает меню «Поделиться», в нём можно сохранить файл." detail:YES]];
+    [self.stack addArrangedSubview:[self label:@"0.2.3-alpha · Диагностическая сборка · Проверка на устройстве ещё требуется" detail:YES]];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(refresh) name:DNUpdate object:nil]; [self refresh];
 }
-- (void)dealloc { [NSNotificationCenter.defaultCenter removeObserver:self]; }
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];[self.refreshTimer invalidate];__weak DNVOTPanel *weakSelf=self;
+    self.refreshTimer=[NSTimer scheduledTimerWithTimeInterval:0.5 repeats:YES block:^(__unused NSTimer *t) { [weakSelf refresh]; }];
+}
+- (void)viewDidDisappear:(BOOL)animated { [super viewDidDisappear:animated];[self.refreshTimer invalidate];self.refreshTimer=nil; }
+- (void)dealloc { [self.refreshTimer invalidate];[NSNotificationCenter.defaultCenter removeObserver:self]; }
 - (void)refresh {
     DNVOTController *c = DNVOTController.shared; self.statusLabel.text = c.statusText;
+    self.logStatus.text=DNFlightRecorder.shared.state;self.logStart.enabled=!DNFlightRecorder.shared.recording;self.logStop.enabled=DNFlightRecorder.shared.recording;
     self.offsetLabel.text = [NSString stringWithFormat:@"Смещение перевода: %+.1f с", c.offset];
     [self.action setTitle:c.enabled ? @"Выключить перевод" : @"Включить перевод" forState:UIControlStateNormal];
 }
@@ -413,6 +507,18 @@ static NSString *const DNUpdate = @"DNVoiceTranslationUpdated";
 - (void)offsetChanged:(UIStepper *)stepper { DNVOTController.shared.offset = stepper.value; [DNVOTController.shared saveSettings]; [self refresh]; }
 - (void)autoChanged:(UISwitch *)toggle { DNVOTController.shared.autoTranslate = toggle.on; [DNVOTController.shared saveSettings]; }
 - (void)toggle { if (DNVOTController.shared.enabled) [DNVOTController.shared stop]; else [DNVOTController.shared start]; [self refresh]; }
+- (void)startLog { [DNFlightRecorder.shared start]; }
+- (void)stopLog { [DNFlightRecorder.shared stop]; }
+- (void)exportLog:(UIButton *)sender {
+    __weak DNVOTPanel *weakSelf=self;
+    [DNFlightRecorder.shared exportFile:^(NSURL *url,NSString *error) {
+        DNVOTPanel *s=weakSelf;if (!s || !s.view.window || s.presentedViewController) return;
+        if (!url) { s.logStatus.text=error;return; }
+        UIActivityViewController *share=[[UIActivityViewController alloc] initWithActivityItems:@[url] applicationActivities:nil];
+        share.popoverPresentationController.sourceView=sender;share.popoverPresentationController.sourceRect=sender.bounds;
+        [s presentViewController:share animated:YES completion:nil];
+    }];
+}
 - (void)copyDiagnostics { UIPasteboard.generalPasteboard.string = [DNVOTController.shared diagnostics]; }
 - (void)openAccount { [self.navigationController pushViewController:[DNVOTAccountSettings new] animated:YES]; }
 - (void)openServer { [self.navigationController pushViewController:[DNVOTServiceSettings new] animated:YES]; }

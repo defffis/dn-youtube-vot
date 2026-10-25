@@ -1,0 +1,2 @@
+PASS: protobuf bounds, session, translation/help/audio fields, binary payload, lively voice, control idle/wait/armed/playing/disable, measured clock and stale pause recovery, local transport 400-step playback/seek, bounded restart, 0.5x/2x boundaries, pause, seek, rate, ads, buffering, partial coverage, offset, invalid clocks
+PASS: C++ request bytes match Google Protobuf for session, standard translation and lively translation

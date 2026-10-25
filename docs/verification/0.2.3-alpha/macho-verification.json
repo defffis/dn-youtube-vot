@@ -1,0 +1,41 @@
+{
+  "file": "DNYouTubeVOT.dylib",
+  "bytes": 421344,
+  "sha256": "7441e44984b2b34ecdcb5c99f78a0bd087a6a8e7134181bf54b2bddba7c9f6c3",
+  "format": "Mach-O 64-bit dynamically linked shared library",
+  "architecture": "arm64",
+  "platform": "iOS device",
+  "minimum_ios": "16.0.0",
+  "sdk_metadata": "16.4.0",
+  "install_name": "@rpath/DNYouTubeVOT.dylib",
+  "dependencies": [
+    "/usr/lib/libc++.1.dylib",
+    "/usr/lib/libobjc.A.dylib",
+    "/usr/lib/libSystem.B.dylib",
+    "/System/Library/Frameworks/Foundation.framework/Foundation",
+    "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation",
+    "/System/Library/Frameworks/UIKit.framework/UIKit",
+    "/System/Library/Frameworks/Security.framework/Security",
+    "/System/Library/Frameworks/SafariServices.framework/SafariServices",
+    "/System/Library/Frameworks/AVFoundation.framework/AVFoundation",
+    "/System/Library/Frameworks/AVFAudio.framework/AVFAudio",
+    "/System/Library/Frameworks/CoreMedia.framework/CoreMedia",
+    "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics"
+  ],
+  "uuid": "4C4C444B-5555-3144-A11F-26C2BC725CC6",
+  "constructors_checked": 1,
+  "third_party_tweak_dependencies": [],
+  "signature": "ad-hoc; SHA-256 code-page hashes verified",
+  "verified_code_pages": 103,
+  "compiled_features": [
+    "Objective-C++",
+    "ARC",
+    "blocks",
+    "Foundation",
+    "UIKit",
+    "C++17",
+    "AVFoundation"
+  ],
+  "device_runtime_tested": false,
+  "apple_certificate_signed": false
+}

@@ -2,6 +2,7 @@
 #include "../src/SyncPolicy.hpp"
 #include "../src/ControlState.hpp"
 #include "../src/PlaybackClock.hpp"
+#include "../src/LocalTransport.hpp"
 #include <cassert>
 #include <iostream>
 #include <limits>
@@ -69,6 +70,31 @@ int main(int argc, char **argv) {
     observed=sync(289.191,289.028,0,1,true,false,true,1441);assert(observed.audible && !observed.seek && observed.rate>0);
     observed=sync(289.191,289.028,0,1,true,true,true,1441);assert(!observed.audible);
     observed=sync(289.191,289.028,0,1,true,false,true,289);assert(!observed.audible); // report coverage separately
+    // Local file playback doesn't restart for drift-rate updates. A remote seek
+    // completion used to recursively request play/seek while video kept moving.
+    double localTime=0,lastAttempt=-INFINITY;float localRate=1;bool playing=false;
+    unsigned starts=0,seeks=0;
+    for (unsigned i=0;i<400;i++) {
+        double now=i*0.2;
+        double video=324.657+now+(i>=200 ? 60 : 0);
+        auto step=localTransport(video,localTime,0,1,true,false,1441.272,playing,now,lastAttempt);
+        assert(step.supported && step.sync.audible);
+        if (step.sync.seek) { localTime=step.sync.target;++seeks; }
+        localRate=step.sync.rate;
+        if (step.play) { playing=true;lastAttempt=now;++starts; }
+        localTime+=0.2*localRate;
+    }
+    assert(starts==1 && seeks==2); // initial alignment and one explicit video seek
+    auto local=localTransport(324.657,324.573,0,1,true,false,1441.272,true,10,9);
+    assert(!local.play && !local.sync.seek); // user report: don't restart an advancing player
+    local=localTransport(10,10,0,1,true,false,100,false,10,9.8);assert(!local.play);
+    local=localTransport(10,10,0,1,true,false,100,false,11,9.8);assert(local.play); // failed starts are bounded
+    local=localTransport(10,9.8,0,2,true,false,100,true,10,9);assert(local.sync.rate==2);
+    local=localTransport(10,10.2,0,0.5f,true,false,100,true,10,9);assert(local.sync.rate==0.5f);
+    local=localTransport(10,10,0,3,true,false,100,false,10,9);assert(!local.supported && !local.play && !local.sync.audible);
+    local=localTransport(10,10,0,1,false,false,100,true,10,9);assert(!local.sync.audible && !local.play);
+    local=localTransport(10,10,0,1,true,true,100,true,10,9);assert(!local.sync.audible && !local.play);
+    local=localTransport(110,10,0,1,true,false,100,false,10,9);assert(!local.sync.audible && !local.sync.seek && !local.play);
     Bytes audioBytes = {1, 2, 3, 0, 255};
     auto a = audio("tid", "url", "fid", audioBytes.data(), audioBytes.size());
     f = parse(a.data(), a.size()); assert(f.count(6) == 1 && f.count(4) == 0);
@@ -91,5 +117,5 @@ int main(int argc, char **argv) {
     d = sync(10, NAN, 0, 1, true, false, true, 100); assert(!d.audible);
     d = sync(10, 10, 0, INFINITY, true, false, true, 100); assert(!d.audible);
     d = sync(10, 10, 0, 0, true, false, true, 100); assert(!d.audible);
-    std::cout << "PASS: protobuf bounds, session, translation/help/audio fields, binary payload, lively voice, control idle/wait/armed/playing/disable, measured clock and stale pause recovery, pause, seek, rate, ads, buffering, partial coverage, offset, invalid clocks\n";
+    std::cout << "PASS: protobuf bounds, session, translation/help/audio fields, binary payload, lively voice, control idle/wait/armed/playing/disable, measured clock and stale pause recovery, local transport 400-step playback/seek, bounded restart, 0.5x/2x boundaries, pause, seek, rate, ads, buffering, partial coverage, offset, invalid clocks\n";
 }
