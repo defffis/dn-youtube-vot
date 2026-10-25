@@ -5,6 +5,7 @@
 #include "../src/LocalTransport.hpp"
 #include "../src/FeaturePolicy.hpp"
 #include "../src/CachePolicy.hpp"
+#include "../src/AutoStartGate.hpp"
 #include <cassert>
 #include <iostream>
 #include <limits>
@@ -17,6 +18,25 @@ static void reject(const dnvot::Bytes &b) {
 }
 int main(int argc, char **argv) {
     using namespace dnvot;
+    AutoStartGate gate;
+    assert(!gate.observe("A",0,0));
+    assert(!gate.observe("A",0.2,0.2));
+    assert(!gate.observe("A",0.4,0.4));
+    assert(!gate.observe("A",0.47,0.6));
+    // Report regression: native video freezes at its first frame, metadata is ready.
+    for (int i=4;i<=50;i++) assert(!gate.observe("A",0.47,i*0.2));
+    assert(!gate.observe("A",0.67,10.2));
+    for (int i=1;i<5;i++) assert(!gate.observe("A",0.67+i*0.2,10.2+i*0.2));
+    assert(gate.observe("A",1.87,11.4));
+    assert(!gate.observe("B",50,11.6)); // switching / cached translation does not bypass motion
+    assert(!gate.observe("B",50,12.8));
+    assert(!gate.observe("B",50.2,13));
+    for (int i=1;i<6;i++) gate.observe("B",50.2+i*0.2,13+i*0.2);
+    assert(gate.observe("B",51.4,14.2));
+    assert(!gate.observe("B",100,14.4)); // seek resets continuous motion
+    assert(!gate.observe("B",100.2,14.6));
+    assert(!gate.observe("B",NAN,15));
+    assert(!gate.observe("",0,16));
     const double saved=1700000000;
     assert(!cacheExpired(saved+86399.999,saved,saved));
     assert(cacheExpired(saved+86400,saved,saved));
@@ -30,7 +50,7 @@ int main(int argc, char **argv) {
     assert(cacheMayDelete(saved+90000,saved,saved,false)); // delete once released
     assert(!cacheMayDelete(saved+10,saved,saved,false));
     assert(sameVideo("", "")); // nil/nil must not create a stop every 200 ms
-    assert(!sameVideo("", "3BhO899BhyY"));
+    assert(!sameVideo("", "testVideo01"));
     assert(languageCode("EN-us")=="en" && languageCode("ru.4")=="ru");
     assert(languageCode("pt_BR")=="pt" && languageCode("zh-Hant-TW")=="zh");
     assert(languageCode("und").empty() && languageCode("auto").empty());
@@ -151,5 +171,5 @@ int main(int argc, char **argv) {
     d = sync(10, NAN, 0, 1, true, false, true, 100); assert(!d.audible);
     d = sync(10, 10, 0, INFINITY, true, false, true, 100); assert(!d.audible);
     d = sync(10, 10, 0, 0, true, false, true, 100); assert(!d.audible);
-    std::cout << "PASS: absolute cache TTL/boundary/cache hits/active-file protection, language normalization, auto exclusions/unknown timeout, proxy modes/prefix/query preservation, empty ID equality, protobuf bounds, session, translation/help/audio fields, binary payload, lively voice, control idle/wait/armed/playing/disable, measured clock and stale pause recovery, local transport 400-step playback/seek, bounded restart, 0.5x/2x boundaries, pause, seek, rate, ads, buffering, partial coverage, offset, invalid clocks\n";
+    std::cout << "PASS: sustained automatic-start gate / initial stalls / video switching / seeks, absolute cache TTL/boundary/cache hits/active-file protection, language normalization, auto exclusions/unknown timeout, proxy modes/prefix/query preservation, empty ID equality, protobuf bounds, session, translation/help/audio fields, binary payload, lively voice, control idle/wait/armed/playing/disable, measured clock and stale pause recovery, local transport 400-step playback/seek, bounded restart, 0.5x/2x boundaries, pause, seek, rate, ads, buffering, partial coverage, offset, invalid clocks\n";
 }

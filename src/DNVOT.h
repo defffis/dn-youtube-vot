@@ -50,3 +50,4 @@ BOOL DNVOTHook(Class cls, NSString *name, char result, const char *args, id (^fa
 void DNVOTInstallNativeUI(void);
 void DNVOTUpdateNativeButtons(void);
 NSString *DNVOTNativeDiagnostics(void);
+NSString *DNVOTPlayerIdentifier(id object);

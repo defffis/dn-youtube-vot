@@ -1,5 +1,20 @@
 #import "DNVOT.h"
 #import "Runtime.hpp"
+#import "FlightRecorder.h"
+
+static const void *DNIdentityKey=&DNIdentityKey;
+NSString *DNVOTPlayerIdentifier(id object) {
+    if (!object) return @"none";
+    NSString *label=objc_getAssociatedObject(object,DNIdentityKey);
+    if (!label) { static NSUInteger sequence=0;label=[NSString stringWithFormat:@"%@#%lu",NSStringFromClass([object class]),(unsigned long)++sequence];objc_setAssociatedObject(object,DNIdentityKey,label,OBJC_ASSOCIATION_COPY_NONATOMIC); }
+    return label;
+}
+static void DNPlayerEvent(NSString *event,id object,id context) {
+    if (!NSThread.isMainThread) {
+        [DNFlightRecorder.shared event:event fields:@{@"class":NSStringFromClass([object class]),@"main_thread":@NO}];return;
+    }
+    [DNFlightRecorder.shared event:event fields:@{@"player":DNVOTPlayerIdentifier(object),@"context_class":context ? NSStringFromClass([context class]) : @"none",@"video":DNVOTController.shared.videoID ?: @"",@"translation_enabled":@(DNVOTController.shared.enabled)}];
+}
 
 BOOL DNVOTHook(Class cls, NSString *name, char result, const char *args, id (^factory)(IMP, SEL)) {
     if (!cls) return NO;
@@ -38,10 +53,11 @@ void DNVOTInstallHooks(void) {
     if (!cls) return;
     NSUInteger count = 0;
     count += DNHook(cls, @"viewDidAppear:", 'v', "B", ^id(IMP original, SEL sel) {
-        return ^(id obj, BOOL animated) { ((void (*)(id, SEL, BOOL))original)(obj, sel, animated); DNObserve(obj); };
+        return ^(id obj, BOOL animated) { DNPlayerEvent(@"native_player_appeared",obj,nil); ((void (*)(id, SEL, BOOL))original)(obj, sel, animated); DNObserve(obj); };
     });
     count += DNHook(cls, @"playbackController:didActivateVideo:withPlaybackData:", 'v', "@@@", ^id(IMP original, SEL sel) {
         return ^(id obj, id controller, id video, id data) {
+            DNPlayerEvent(@"native_video_activation",obj,video);
             ((void (*)(id, SEL, id, id, id))original)(obj, sel, controller, video, data); DNObserve(obj);
         };
     });
@@ -70,5 +86,9 @@ void DNVOTInstallHooks(void) {
             ((void (*)(id, SEL, float))original)(obj, sel, actual);
         };
     });
-    if (count) NSLog(@"[DNVOT] 0.3.1-alpha installed %lu native hooks", (unsigned long)count);
+    // Observe the native reload method; never initiate a reload from VOT.
+    count += DNHook(NSClassFromString(@"YTSingleVideoController"), @"reloadPlayerWithContext:", 'v', "@", ^id(IMP original,SEL sel) {
+        return ^(id obj,id context) { DNPlayerEvent(@"native_player_reload",obj,context);((void(*)(id,SEL,id))original)(obj,sel,context); };
+    });
+    if (count) NSLog(@"[DNVOT] 0.4.0 installed %lu native hooks", (unsigned long)count);
 }
