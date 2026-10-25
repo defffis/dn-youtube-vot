@@ -1,6 +1,7 @@
 #include "../src/VOTWire.hpp"
 #include "../src/SyncPolicy.hpp"
 #include "../src/ControlState.hpp"
+#include "../src/PlaybackClock.hpp"
 #include <cassert>
 #include <iostream>
 #include <limits>
@@ -38,13 +39,36 @@ int main(int argc, char **argv) {
     f = parse(t.data(), t.size()); assert(value(f, 5) == 0 && value(f, 9) == 1);
     t = translation("url",19,"en","ru",true,false,"",true);
     f = parse(t.data(),t.size()); assert(value(f,18)==1);
-    auto state=controlState(false,false,100,105);assert(state.phase==ControlPhase::idle && state.elapsed==0);
-    state=controlState(true,false,100,165.9);assert(state.phase==ControlPhase::waiting && state.elapsed==65);
-    state=controlState(true,true,100,200);assert(state.phase==ControlPhase::active);
-    state=controlState(false,true,100,200);assert(state.phase==ControlPhase::idle); // disable even with a ready item
-    state=controlState(true,false,100,99);assert(state.elapsed==0); // clock rollback
-    state=controlState(true,false,NAN,200);assert(state.elapsed==0);
-    state=controlState(true,false,0,1e100);assert(state.elapsed==86400); // bounded conversion
+    auto state=controlState(false,false,false,100,105);assert(state.phase==ControlPhase::idle && state.elapsed==0);
+    state=controlState(true,false,false,100,165.9);assert(state.phase==ControlPhase::waiting && state.elapsed==65);
+    state=controlState(true,true,true,100,200);assert(state.phase==ControlPhase::active);
+    state=controlState(false,true,true,100,200);assert(state.phase==ControlPhase::idle); // disable even with a ready item
+    state=controlState(true,false,false,100,99);assert(state.elapsed==0); // clock rollback
+    state=controlState(true,false,false,NAN,200);assert(state.elapsed==0);
+    state=controlState(true,false,false,0,1e100);assert(state.elapsed==86400); // bounded conversion
+    state=controlState(true,true,false,100,200);assert(state.phase==ControlPhase::armed); // a ready paused item must not look playing
+    PlaybackClock clock;
+    assert(!clock.observe(288.8,10));
+    assert(clock.observe(289.0,10.2));
+    // Regression: actual progress is sufficient even if private attemptingToPlay is false.
+    assert(clock.observe(289.191,10.4));
+    assert(clock.observe(289.191,10.56)); // matches the reported 0.161s advance age
+    assert(!clock.observe(289.191,11.0)); // stalled/paused source stops translation
+    clock.pause(11.1);assert(!clock.observe(289.2,11.2));
+    assert(!clock.observe(289.3,11.4));
+    assert(!clock.observe(289.3,11.75)); // no recovery based only on old advance samples
+    assert(clock.observe(289.5,11.9)); // fresh progress recovers a stale internal pause
+    clock.pause(12);clock.resume();assert(clock.observe(289.7,12.2));
+    assert(!clock.observe(100,12.4)); // backward seek resets motion evidence
+    assert(clock.observe(100.2,12.6));
+    assert(!clock.observe(500,12.8)); // forward seek is not a playback sample
+    assert(clock.observe(500.2,13));
+    assert(!clock.observe(NAN,13.2));
+    clock.reset();assert(!clock.observe(0,14));assert(clock.observe(0.05,14.2)); // 0.25x
+    auto observed=sync(0.05,0.05,0,0.25f,true,false,true,100);assert(observed.audible);
+    observed=sync(289.191,289.028,0,1,true,false,true,1441);assert(observed.audible && !observed.seek && observed.rate>0);
+    observed=sync(289.191,289.028,0,1,true,true,true,1441);assert(!observed.audible);
+    observed=sync(289.191,289.028,0,1,true,false,true,289);assert(!observed.audible); // report coverage separately
     Bytes audioBytes = {1, 2, 3, 0, 255};
     auto a = audio("tid", "url", "fid", audioBytes.data(), audioBytes.size());
     f = parse(a.data(), a.size()); assert(f.count(6) == 1 && f.count(4) == 0);
@@ -67,5 +91,5 @@ int main(int argc, char **argv) {
     d = sync(10, NAN, 0, 1, true, false, true, 100); assert(!d.audible);
     d = sync(10, 10, 0, INFINITY, true, false, true, 100); assert(!d.audible);
     d = sync(10, 10, 0, 0, true, false, true, 100); assert(!d.audible);
-    std::cout << "PASS: protobuf bounds, session, translation/help/audio fields, binary payload, lively voice, control idle/wait/ready/disable, pause, seek, rate, ads, buffering, partial coverage, offset, invalid clocks\n";
+    std::cout << "PASS: protobuf bounds, session, translation/help/audio fields, binary payload, lively voice, control idle/wait/armed/playing/disable, measured clock and stale pause recovery, pause, seek, rate, ads, buffering, partial coverage, offset, invalid clocks\n";
 }

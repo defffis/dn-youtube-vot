@@ -1,0 +1,23 @@
+{
+  "version": "0.2.2-alpha",
+  "device_runtime_tested": false,
+  "scope": "clock-based audio start, playback indication and diagnostics",
+  "auth_protocol_changed": false,
+  "files": [
+    {
+      "name": "DNYouTubeVOT.dylib",
+      "bytes": 348144,
+      "sha256": "7b056e0d20fe7d18ac37fb650d29a0d46b081c21ba02c325321e6694bbf573ef"
+    },
+    {
+      "name": "DNYouTubeVOT.symbols.txt",
+      "bytes": 87759,
+      "sha256": "a2e8dced098cabc6f3f4c361626e969b2af76c9d8d635f4478b9878dd0ff0980"
+    },
+    {
+      "name": "INSTALL.md",
+      "bytes": 9842,
+      "sha256": "c08283984d315a5f0a8e7b74c4629c3549b1dcb60cefb14feb5bff047b19a0cf"
+    }
+  ]
+}
