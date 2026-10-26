@@ -53,12 +53,12 @@ static id DNJSONSafe(id value) {
         for (NSURL *old in [NSFileManager.defaultManager contentsOfDirectoryAtURL:dir includingPropertiesForKeys:nil options:0 error:nil]) {
             if (![old isEqual:self.url]) [NSFileManager.defaultManager removeItemAtURL:old error:nil];
         }
-        NSURL *url=[dir URLByAppendingPathComponent:[NSString stringWithFormat:@"DNVOT-0.4.0-%@.jsonl",NSUUID.UUID.UUIDString]];
+        NSURL *url=[dir URLByAppendingPathComponent:[NSString stringWithFormat:@"DNVOT-0.4.1-test.1-%@.jsonl",NSUUID.UUID.UUIDString]];
         if (![NSFileManager.defaultManager createFileAtPath:url.path contents:nil attributes:@{NSFileProtectionKey:NSFileProtectionCompleteUntilFirstUserAuthentication}]) { self.state=@"Не удалось создать лог";return; }
         self.file=[NSFileHandle fileHandleForWritingToURL:url error:nil];
         if (!self.file) { self.state=@"Не удалось открыть лог";return; }
         self.url=url;self.bytes=0;self.started=NSProcessInfo.processInfo.systemUptime;self.recording=YES;self.state=@"Запись лога идёт";
-        [self writeEvent:@"recording_start" fields:@{@"version":@"0.4.0",@"utc":[[[NSISO8601DateFormatter alloc] init] stringFromDate:NSDate.date],@"privacy":@"No OAuth, URLs, account names, headers or audio. Video ID and playback telemetry included.",@"ios":NSProcessInfo.processInfo.operatingSystemVersionString,@"youtube":[NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"—"}];
+        [self writeEvent:@"recording_start" fields:@{@"version":@"0.4.1-test.1",@"utc":[[[NSISO8601DateFormatter alloc] init] stringFromDate:NSDate.date],@"privacy":@"No OAuth, URLs, account names, headers or audio. Video ID and playback telemetry included.",@"ios":NSProcessInfo.processInfo.operatingSystemVersionString,@"youtube":[NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"—"}];
     });
 }
 - (void)stop {

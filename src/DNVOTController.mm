@@ -194,6 +194,15 @@ static NSString *const DNUpdate = @"DNVoiceTranslationUpdated";
         dispatch_async(dispatch_get_main_queue(), ^{ if (weak) [self observePlayer:weak]; }); return;
     }
     if (![player isKindOfClass:UIViewController.class]) return;
+    NSString *unsupported=DNVOTUnsupportedPlayerContext(player);
+    if (unsupported) {
+        static const void *ignoredKey=&ignoredKey;
+        if (!objc_getAssociatedObject(player,ignoredKey)) {
+            objc_setAssociatedObject(player,ignoredKey,@YES,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            [self record:@"player_candidate_ignored" fields:@{@"player":DNVOTPlayerIdentifier(player),@"context":unsupported}];
+        }
+        return;
+    }
     UIViewController *vc = player;
     if (!vc.isViewLoaded || !vc.view.window) return;
     if (self.player != player) {
@@ -381,8 +390,9 @@ static id DNField(id object,NSString *key) {
     double sweepNow=NSProcessInfo.processInfo.systemUptime;
     if (sweepNow>=self.cacheSweepAt) { [DNTranslationCache pruneExpired];self.cacheSweepAt=sweepNow+60; }
     id player = self.player;
-    if (!player) {
+    if (!player || DNVOTUnsupportedPlayerContext(player)) {
         if (self.enabled) [self stop];
+        self.player=nil;self.videoID=nil;_autoGate.reset();self.autoStartReady=NO;
         [self recordSample];
         DNVOTUpdateNativeButtons(); return;
     }
@@ -500,7 +510,7 @@ static id DNField(id object,NSString *key) {
 }
 - (NSString *)diagnostics {
     self.detectedLanguage=[self resolveLanguage];
-    return [NSString stringWithFormat:@"DN YouTube Voice Translation 0.4.0\nYouTube: %@\niOS: %@\nVideo: %@\nEnabled: %@\nStatus: %@\nBackend: AVAudioPlayer / complete local file\nPlayback gate: %@\nContent time: %.3f\nContent clock moving: %@\nSync user paused: %@\nAudio playing: %@\nAudio time: %.3f\nAudio duration: %.3f\nAudio rate: %.3f\nAudio channels: %lu\nTranslation volume: %.3f\nOriginal volume: %.3f\nOriginal saved volume: %.3f\nOriginal level: %.3f\nDucking: %@\nLast volume setter succeeded: %@\nPlay commands: %lu\nSeek commands: %lu\nLast play succeeded: %@\nAudio error: %@\nDownloaded bytes: %lld / %lld\nRecorder: %@\nSession: %@\n%@\n%@\n%@", [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"],UIDevice.currentDevice.systemVersion,self.videoID ?: @"—",self.enabled ? @"YES" : @"NO",self.statusText,self.playbackGate,DNNumber(self.player,@"contentVideoMediaTime",-1),self.clockMoving ? @"YES" : @"NO",_clock.paused ? @"YES" : @"NO",self.audio.playing ? @"YES" : @"NO",self.audio.currentTime,self.audio.duration,self.audio.rate,(unsigned long)self.audio.numberOfChannels,self.audio.volume,DNNumber(self.player,@"volume",-1),self.savedVolume,self.originalLevel,self.ducking ? @"YES" : @"NO",self.volumeApplied ? @"YES" : @"NO",(unsigned long)self.playCommands,(unsigned long)self.seekCommands,self.playCommands ? (self.lastPlaySucceeded ? @"YES" : @"NO") : @"— (no attempt for this video)",self.audioError ?: @"—",(long long)self.downloadedBytes,(long long)self.expectedBytes,DNFlightRecorder.shared.state,[self sessionFields],DNVOTBootstrapDiagnostics(),DNVOTNativeDiagnostics(),[[self.client diagnostics] stringByAppendingFormat:@"\nAuto translate: %@\nExcluded: %@\nDetected language: %@ (%@)\nCache bytes: %llu\nCache auto-clean: ON / 24h from save\nAuto start gate: %@\nPlayer instance: %@",self.autoTranslate ? @"YES" : @"NO",[self.excludedLanguages.allObjects componentsJoinedByString:@","],self.detectedLanguage ?: @"unknown",self.languageSource ?: @"unknown",[self cacheBytes],self.autoStartReady ? @"ready" : @"waiting for sustained progress",DNVOTPlayerIdentifier(self.player)]];
+    return [NSString stringWithFormat:@"DN YouTube Voice Translation 0.4.1-test.1\nYouTube: %@\niOS: %@\nVideo: %@\nEnabled: %@\nStatus: %@\nBackend: AVAudioPlayer / complete local file\nPlayback gate: %@\nContent time: %.3f\nContent clock moving: %@\nSync user paused: %@\nAudio playing: %@\nAudio time: %.3f\nAudio duration: %.3f\nAudio rate: %.3f\nAudio channels: %lu\nTranslation volume: %.3f\nOriginal volume: %.3f\nOriginal saved volume: %.3f\nOriginal level: %.3f\nDucking: %@\nLast volume setter succeeded: %@\nPlay commands: %lu\nSeek commands: %lu\nLast play succeeded: %@\nAudio error: %@\nDownloaded bytes: %lld / %lld\nRecorder: %@\nSession: %@\n%@\n%@\n%@", [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"],UIDevice.currentDevice.systemVersion,self.videoID ?: @"—",self.enabled ? @"YES" : @"NO",self.statusText,self.playbackGate,DNNumber(self.player,@"contentVideoMediaTime",-1),self.clockMoving ? @"YES" : @"NO",_clock.paused ? @"YES" : @"NO",self.audio.playing ? @"YES" : @"NO",self.audio.currentTime,self.audio.duration,self.audio.rate,(unsigned long)self.audio.numberOfChannels,self.audio.volume,DNNumber(self.player,@"volume",-1),self.savedVolume,self.originalLevel,self.ducking ? @"YES" : @"NO",self.volumeApplied ? @"YES" : @"NO",(unsigned long)self.playCommands,(unsigned long)self.seekCommands,self.playCommands ? (self.lastPlaySucceeded ? @"YES" : @"NO") : @"— (no attempt for this video)",self.audioError ?: @"—",(long long)self.downloadedBytes,(long long)self.expectedBytes,DNFlightRecorder.shared.state,[self sessionFields],DNVOTBootstrapDiagnostics(),DNVOTNativeDiagnostics(),[[self.client diagnostics] stringByAppendingFormat:@"\nAuto translate: %@\nExcluded: %@\nDetected language: %@ (%@)\nCache bytes: %llu\nCache auto-clean: ON / 24h from save\nAuto start gate: %@\nPlayer instance: %@",self.autoTranslate ? @"YES" : @"NO",[self.excludedLanguages.allObjects componentsJoinedByString:@","],self.detectedLanguage ?: @"unknown",self.languageSource ?: @"unknown",[self cacheBytes],self.autoStartReady ? @"ready" : @"waiting for sustained progress",DNVOTPlayerIdentifier(self.player)]];
 }
 @end
 

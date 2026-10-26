@@ -6,6 +6,7 @@
 #include "../src/FeaturePolicy.hpp"
 #include "../src/CachePolicy.hpp"
 #include "../src/AutoStartGate.hpp"
+#include "../src/PlayerPolicy.hpp"
 #include <cassert>
 #include <iostream>
 #include <limits>
@@ -18,6 +19,31 @@ static void reject(const dnvot::Bytes &b) {
 }
 int main(int argc, char **argv) {
     using namespace dnvot;
+    assert(excludedPlaybackClass("YTInlineMutedPlaybackWatchViewController"));
+    assert(excludedPlaybackClass("YTInlineMutedPlaybackPlayerOverlayViewController"));
+    assert(excludedPlaybackClass("YTShortsPlayerViewController"));
+    assert(excludedPlaybackClass("YTReelWatchPlaybackOverlayView"));
+    assert(!excludedPlaybackClass("YTPlayerViewController"));
+    assert(!excludedPlaybackClass("YTMainAppVideoPlayerOverlayViewController"));
+    assert(!excludedPlaybackClass("YTWatchMiniBarViewController"));
+    assert(!excludedPlaybackClass(""));
+    TopControlsVisibility visibility;
+    assert(!visibility.visible(false) && visibility.visible(true));
+    visibility.update(true,false);
+    assert(visibility.visible(false)); // optional overflow is hidden, row is shown
+    visibility.update(false,false);
+    assert(!visibility.visible(true)); // row hidden while a neighbour is still fading
+    visibility.update(true,true);
+    assert(!visibility.visible(true)); // autonav cancellation hides controls
+    visibility.update(true,false);
+    assert(visibility.visible(true));
+    visibility.updateOverlay(false);
+    assert(!visibility.visible(true)); // hiding the whole overlay always wins
+    visibility.updateOverlay(true);
+    assert(visibility.visible(false));
+    visibility.update(true,true);
+    visibility.updateOverlay(true);
+    assert(!visibility.visible(true)); // generic show cannot undo cancelled top row
     AutoStartGate gate;
     assert(!gate.observe("A",0,0));
     assert(!gate.observe("A",0.2,0.2));
@@ -171,5 +197,5 @@ int main(int argc, char **argv) {
     d = sync(10, NAN, 0, 1, true, false, true, 100); assert(!d.audible);
     d = sync(10, 10, 0, INFINITY, true, false, true, 100); assert(!d.audible);
     d = sync(10, 10, 0, 0, true, false, true, 100); assert(!d.audible);
-    std::cout << "PASS: sustained automatic-start gate / initial stalls / video switching / seeks, absolute cache TTL/boundary/cache hits/active-file protection, language normalization, auto exclusions/unknown timeout, proxy modes/prefix/query preservation, empty ID equality, protobuf bounds, session, translation/help/audio fields, binary payload, lively voice, control idle/wait/armed/playing/disable, measured clock and stale pause recovery, local transport 400-step playback/seek, bounded restart, 0.5x/2x boundaries, pause, seek, rate, ads, buffering, partial coverage, offset, invalid clocks\n";
+    std::cout << "PASS: preview/Shorts scope and top-controls visibility; sustained automatic-start gate / initial stalls / video switching / seeks, absolute cache TTL/boundary/cache hits/active-file protection, language normalization, auto exclusions/unknown timeout, proxy modes/prefix/query preservation, empty ID equality, protobuf bounds, session, translation/help/audio fields, binary payload, lively voice, control idle/wait/armed/playing/disable, measured clock and stale pause recovery, local transport 400-step playback/seek, bounded restart, 0.5x/2x boundaries, pause, seek, rate, ads, buffering, partial coverage, offset, invalid clocks\n";
 }

@@ -1,6 +1,7 @@
 #import "DNVOT.h"
 #import "Runtime.hpp"
 #import "Preferences.h"
+#include "PlayerPolicy.hpp"
 
 static const NSUInteger DNCategory = 0x444e5654; // DNVT; independent settings category
 static const void *DNButtonKey = &DNButtonKey;
@@ -42,7 +43,10 @@ static id DNIvarObject(id object, const char *name) {
 - (void)hold:(UILongPressGestureRecognizer *)gesture { if (gesture.state==UIGestureRecognizerStateBegan) [self settings]; }
 @end
 
-@interface DNVOTButtonOwner : NSObject
+@interface DNVOTButtonOwner : NSObject {
+@public
+    dnvot::TopControlsVisibility visibility;
+}
 @property(nonatomic,weak) UIView *overlay;
 @property(nonatomic,copy) NSString *reference;
 @end
@@ -57,14 +61,18 @@ static id DNIvarObject(id object, const char *name) {
 @end
 
 static UIView *DNReference(id overlay, NSString **selector) {
+    UIView *fallback=nil;NSString *fallbackName=nil;
     for (NSString *name in @[@"overflowButton",@"closedCaptionsOrSubtitlesButton",@"playbackRouteButton"]) {
         id view=DNObject(overlay,name);
         if ([view isKindOfClass:UIView.class] && [(UIView *)view isDescendantOfView:overlay]) {
+            if (!fallback) { fallback=view;fallbackName=name; }
+            if ([(UIView *)view isHidden] || [(UIView *)view alpha]<0.01) continue;
             if (selector) *selector=name;
             return view;
         }
     }
-    return nil;
+    if (selector) *selector=fallbackName;
+    return fallback;
 }
 static UIButton *DNControlsButton(id overlay) {
     UIButton *button=objc_getAssociatedObject(overlay,DNButtonKey);
@@ -101,6 +109,7 @@ static void DNRefreshButton(UIView *overlay, BOOL requestLayout) {
     UIButton *button=objc_getAssociatedObject(overlay,DNButtonKey);
     if (!button) return;
     DNVOTButtonOwner *owner=objc_getAssociatedObject(button,DNOwnerKey);
+    if (!owner) return;
     NSString *name=nil;UIView *reference=DNReference(overlay,&name);owner.reference=name;
     id rawHost=DNObject(overlay,@"topControlsAccessibilityContainerView");
     UIView *host=[rawHost isKindOfClass:UIView.class] ? rawHost : reference.superview;
@@ -111,11 +120,13 @@ static void DNRefreshButton(UIView *overlay, BOOL requestLayout) {
     }
     BOOL hidden=button.hidden;
     [DNVOTController.shared updateControlsButton:button];
-    button.hidden=button.hidden || (reference && reference.hidden);
-    button.alpha=reference ? reference.alpha : (DNNumber(overlay,@"isOverlayVisible") ? 1 : 0);
+    BOOL fallback=reference ? (!reference.hidden && reference.alpha>0.01) : DNNumber(overlay,@"isOverlayVisible");
+    BOOL visible=owner->visibility.visible(fallback);
+    button.hidden=button.hidden || !visible;
+    button.alpha=owner->visibility.known ? (visible ? 1 : 0) : (reference ? reference.alpha : (visible ? 1 : 0));
     button.userInteractionEnabled=YES;
     if (hidden!=button.hidden) changed=YES;
-    [button.superview bringSubviewToFront:button];
+    if (button.superview.subviews.lastObject!=button) [button.superview bringSubviewToFront:button];
     // A video ID may become available after native layout skipped the initially hidden button.
     if (requestLayout && changed) [overlay setNeedsLayout];
 }
@@ -170,7 +181,8 @@ NSString *DNVOTNativeDiagnostics(void) {
         CGFloat effective=1;BOOL hidden=NO;UIView *view=button;
         for (NSUInteger depth=0;view && depth<32;depth++,view=view.superview) {effective*=view.alpha;hidden|=view.hidden;}
         CGRect visible=button.window ? [button convertRect:button.bounds toView:button.window] : CGRectZero;
-        [report appendFormat:@"\nButton %lu: frame=%@ bounds=%@ parent=%@ alpha=%.2f effective=%.2f hidden=%@ window=%@ reference=%@ screen=%@",(unsigned long)++index,NSStringFromCGRect(button.frame),NSStringFromCGRect(button.bounds),NSStringFromClass(button.superview.class),button.alpha,effective,hidden ? @"YES" : @"NO",button.window ? @"YES" : @"NO",owner.reference ?: @"—",NSStringFromCGRect(visible)];
+        NSString *visibility=owner && owner->visibility.known ? (owner->visibility.shown ? @"top-visible" : @"top-hidden") : @"reference fallback";
+        [report appendFormat:@"\nButton %lu: frame=%@ bounds=%@ parent=%@ alpha=%.2f effective=%.2f hidden=%@ window=%@ reference=%@ screen=%@ visibility=%@",(unsigned long)++index,NSStringFromCGRect(button.frame),NSStringFromCGRect(button.bounds),NSStringFromClass(button.superview.class),button.alpha,effective,hidden ? @"YES" : @"NO",button.window ? @"YES" : @"NO",owner.reference ?: @"—",NSStringFromCGRect(visible),visibility];
     }
     return report;
 }
@@ -189,8 +201,8 @@ void DNVOTInstallNativeUI(void) {
         ((void(*)(id,SEL))original)(obj,sel);DNLayoutPasses++;
         @try { DNRefreshButton(obj,NO); } @catch (__unused NSException *e) {}
     };});
-    DNUIHooks+=DNVOTHook(overlay,@"setTopOverlayVisible:isAutonavCanceledState:",'v',"BB",^id(IMP original,SEL sel){return ^(id obj,BOOL visible,BOOL cancelled){((void(*)(id,SEL,BOOL,BOOL))original)(obj,sel,visible,cancelled);@try{DNRefreshButton(obj,YES);}@catch(__unused NSException *e){}};});
-    DNUIHooks+=DNVOTHook(overlay,@"setOverlayVisible:",'v',"B",^id(IMP original,SEL sel){return ^(id obj,BOOL visible){((void(*)(id,SEL,BOOL))original)(obj,sel,visible);@try{DNRefreshButton(obj,YES);}@catch(__unused NSException *e){}};});
+    DNUIHooks+=DNVOTHook(overlay,@"setTopOverlayVisible:isAutonavCanceledState:",'v',"BB",^id(IMP original,SEL sel){return ^(id obj,BOOL visible,BOOL cancelled){((void(*)(id,SEL,BOOL,BOOL))original)(obj,sel,visible,cancelled);@try{UIButton *button=DNControlsButton(obj);DNVOTButtonOwner *owner=objc_getAssociatedObject(button,DNOwnerKey);if (owner) owner->visibility.update(visible,cancelled);DNRefreshButton(obj,YES);}@catch(__unused NSException *e){}};});
+    DNUIHooks+=DNVOTHook(overlay,@"setOverlayVisible:",'v',"B",^id(IMP original,SEL sel){return ^(id obj,BOOL visible){((void(*)(id,SEL,BOOL))original)(obj,sel,visible);@try{UIButton *button=DNControlsButton(obj);DNVOTButtonOwner *owner=objc_getAssociatedObject(button,DNOwnerKey);if (owner) owner->visibility.updateOverlay(visible);DNRefreshButton(obj,YES);}@catch(__unused NSException *e){}};});
     DNUIHooks+=DNVOTHook(overlay,@"setVideoControlsVisibility:",'v',"q",^id(IMP original,SEL sel){return ^(id obj,NSInteger visibility){((void(*)(id,SEL,NSInteger))original)(obj,sel,visibility);@try{DNRefreshButton(obj,YES);}@catch(__unused NSException *e){}};});
     DNUIHooks+=DNVOTHook(overlay,@"didPressOverflow:",'v',"@",^id(IMP original,SEL sel){return ^(id obj,id sender){DNMenuIntent=NSProcessInfo.processInfo.systemUptime+3;((void(*)(id,SEL,id))original)(obj,sel,sender);};});
     DNUIHooks+=DNVOTHook(NSClassFromString(@"YTMainAppVideoPlayerOverlayViewController"),@"didPressOverflow:",'v',"@",^id(IMP original,SEL sel){return ^(id obj,id sender){DNMenuIntent=NSProcessInfo.processInfo.systemUptime+3;((void(*)(id,SEL,id))original)(obj,sel,sender);};});

@@ -51,3 +51,4 @@ void DNVOTInstallNativeUI(void);
 void DNVOTUpdateNativeButtons(void);
 NSString *DNVOTNativeDiagnostics(void);
 NSString *DNVOTPlayerIdentifier(id object);
+NSString *DNVOTUnsupportedPlayerContext(id player);

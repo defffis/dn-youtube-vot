@@ -1,6 +1,25 @@
 #import "DNVOT.h"
 #import "Runtime.hpp"
 #import "FlightRecorder.h"
+#include "PlayerPolicy.hpp"
+
+static NSString *DNExcludedClass(id object) {
+    for (Class cls=object_getClass(object);cls;cls=class_getSuperclass(cls)) {
+        NSString *name=NSStringFromClass(cls);
+        if (dnvot::excludedPlaybackClass(name.UTF8String ?: "")) return name;
+    }
+    return nil;
+}
+NSString *DNVOTUnsupportedPlayerContext(id player) {
+    NSString *reason=DNExcludedClass(DNObject(player,@"activeVideoPlayerOverlay"));
+    if (reason) return reason;
+    UIViewController *vc=[player isKindOfClass:UIViewController.class] ? player : nil;
+    for (NSUInteger depth=0;vc && depth<12;depth++,vc=vc.parentViewController) {
+        reason=DNExcludedClass(vc);
+        if (reason) return reason;
+    }
+    return nil;
+}
 
 static const void *DNIdentityKey=&DNIdentityKey;
 NSString *DNVOTPlayerIdentifier(id object) {
@@ -90,5 +109,5 @@ void DNVOTInstallHooks(void) {
     count += DNHook(NSClassFromString(@"YTSingleVideoController"), @"reloadPlayerWithContext:", 'v', "@", ^id(IMP original,SEL sel) {
         return ^(id obj,id context) { DNPlayerEvent(@"native_player_reload",obj,context);((void(*)(id,SEL,id))original)(obj,sel,context); };
     });
-    if (count) NSLog(@"[DNVOT] 0.4.0 installed %lu native hooks", (unsigned long)count);
+    if (count) NSLog(@"[DNVOT] 0.4.1-test.1 installed %lu native hooks", (unsigned long)count);
 }
