@@ -23,8 +23,16 @@
 | Причина повторной инициализации видео | Не установлена; [разбор и сравнение](docs/TROUBLESHOOTING.md) |
 
 Сборка Clang -Werror, Mach-O/ad-hoc hashes, UBSan и Google Protobuf parity выполнены
-локально. GitHub Actions настроен для ручного запуска, но не выдаётся за пройденный
-CI-прогон. [Доказательства текущего релиза](docs/verification/0.4.2/verification.md).
+локально. Ручной GitHub Actions [№27 от 27.10.2026](https://github.com/defffis/dn-youtube-vot/actions/runs/40576898285)
+успешно выполнил восстановление LLVM/SDK, сборку ARM64, тесты, проверку Mach-O и
+загрузку артефакта для коммита `bcbec29`. Исправлена недопустимая ссылка на
+`runner.temp` в job-level env: путь экспортируется в `$GITHUB_ENV` внутри шага.
+Триггер — только `workflow_dispatch`, без расписания, push и release.
+[Доказательства текущего релиза](docs/verification/0.4.2/verification.md).
+
+English: manual CI run #27 passed on commit `bcbec29`, including the ARM64 build,
+tests, Mach-O validation and artifact upload. The invalid job-level runner context
+was replaced with a step exporting the toolchain path. Builds remain manual-only.
 
 Не подтверждены: чистая IPA без других модов, другие версии YouTube/iOS,
 длительные PiP/фон, Bluetooth/звонки/Cast, legacy Worker и проксирование всего аудио,
