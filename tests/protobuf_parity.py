@@ -8,9 +8,13 @@ fd=descriptor_pb2.FileDescriptorProto(name='dnvot_test.proto',syntax='proto3')
 for msgname,fields in [('Session',[(1,'uuid',9),(2,'module',9)]),('Translation',[(3,'url',9),(5,'first_request',8),(6,'duration',1),(7,'unknown0',8),(8,'language',9),(14,'response_language',9),(15,'unknown2',8),(16,'config_version',5),(18,'lively',8)])]:
     msg=fd.message_type.add(name=msgname)
     for n,name,t in fields:msg.field.add(name=name,number=n,type=t,label=1)
+response=fd.message_type.add(name='Response')
+response.oneof_decl.add(name='_remaining_time')
+response.field.add(name='remaining_time',number=5,type=5,label=1,proto3_optional=True,oneof_index=0)
 pool=descriptor_pool.DescriptorPool();pool.Add(fd)
 Session=message_factory.GetMessageClass(pool.FindMessageTypeByName('Session'))
 Translation=message_factory.GetMessageClass(pool.FindMessageTypeByName('Translation'))
+Response=message_factory.GetMessageClass(pool.FindMessageTypeByName('Response'))
 cli=Path(__file__).resolve().parents[1]/'build/core_tests'
 s=Session(uuid='0123456789ABCDEF0123456789ABCDEF',module='video-translation')
 actual=bytes.fromhex(subprocess.check_output([str(cli),'session',s.uuid],text=True).strip())
@@ -22,3 +26,10 @@ t.lively=True
 actual=bytes.fromhex(subprocess.check_output([str(cli),'lively','jNQXAC9IVRw'],text=True).strip())
 assert actual==t.SerializeToString()
 print('PASS: C++ request bytes match Google Protobuf for session, standard translation and lively translation')
+for seconds in [None,-1,-2147483648,0,1,45,86400,86401,2147483647]:
+    message=Response()
+    if seconds is not None:message.remaining_time=seconds
+    wire=message.SerializeToString()
+    actual=float(subprocess.check_output([str(cli),'eta-response',wire.hex()],text=True).strip())
+    assert actual==(seconds if seconds is not None and 0<seconds<=86400 else -1)
+print('PASS: C++ optional/signed ETA decoding matches Google Protobuf response fixtures')

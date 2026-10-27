@@ -1,7 +1,9 @@
 #import "DNVOT.h"
 #import "Runtime.hpp"
 #import "Preferences.h"
+#import "PlayerButton.h"
 #include "PlayerPolicy.hpp"
+#include "ControlGeometry.hpp"
 
 static const NSUInteger DNCategory = 0x444e5654; // DNVT; independent settings category
 static const void *DNButtonKey = &DNButtonKey;
@@ -53,16 +55,9 @@ static id DNIvarObject(id object, const char *name) {
 @implementation DNVOTButtonOwner
 @end
 
-@interface DNVOTPlayerButton : UIButton
-@end
-@implementation DNVOTPlayerButton
-- (CGSize)intrinsicContentSize { return CGSizeMake(44,44); }
-- (CGSize)sizeThatFits:(__unused CGSize)size { return CGSizeMake(44,44); }
-@end
-
 static UIView *DNReference(id overlay, NSString **selector) {
     UIView *fallback=nil;NSString *fallbackName=nil;
-    for (NSString *name in @[@"overflowButton",@"closedCaptionsOrSubtitlesButton",@"playbackRouteButton"]) {
+    for (NSString *name in @[@"closedCaptionsOrSubtitlesButton",@"playbackRouteButton",@"overflowButton"]) {
         id view=DNObject(overlay,name);
         if ([view isKindOfClass:UIView.class] && [(UIView *)view isDescendantOfView:overlay]) {
             if (!fallback) { fallback=view;fallbackName=name; }
@@ -78,9 +73,10 @@ static UIButton *DNControlsButton(id overlay) {
     UIButton *button=objc_getAssociatedObject(overlay,DNButtonKey);
     if (button) return button;
     if (![overlay isKindOfClass:UIView.class]) return nil;
-    // Native layout reads each control's current width/height; it does not sizeToFit.
-    // Keep sizing/image/visibility under our control rather than YTQTMButton internals.
-    button=[[DNVOTPlayerButton alloc] initWithFrame:CGRectMake(0,0,44,44)];
+    // Reserve the same row width as an ordinary native icon, with a larger hit target.
+    UIView *reference=DNReference(overlay,nil);
+    auto size=dnvot::nativeControlSize(CGRectGetWidth(reference.bounds),CGRectGetHeight(reference.bounds));
+    button=[[DNVOTPlayerButton alloc] initWithFrame:CGRectMake(0,0,size.width,size.height)];
     button.autoresizingMask=UIViewAutoresizingNone;
     button.translatesAutoresizingMaskIntoConstraints=YES;
     button.accessibilityIdentifier=@"DNVOT.PlayerToggle";
@@ -92,7 +88,6 @@ static UIButton *DNControlsButton(id overlay) {
     button.exclusiveTouch=YES;
     [button addTarget:DNVOTUIActions.shared action:@selector(toggle) forControlEvents:UIControlEventTouchUpInside];
     UILongPressGestureRecognizer *hold=[[UILongPressGestureRecognizer alloc] initWithTarget:DNVOTUIActions.shared action:@selector(hold:)];hold.minimumPressDuration=0.55;[button addGestureRecognizer:hold];
-    UIView *reference=DNReference(overlay,nil);
     id container=DNObject(overlay,@"topControlsAccessibilityContainerView");
     if (![container isKindOfClass:UIView.class]) container=reference.superview;
     if (![container isKindOfClass:UIView.class]) container=overlay;
@@ -115,8 +110,18 @@ static void DNRefreshButton(UIView *overlay, BOOL requestLayout) {
     UIView *host=[rawHost isKindOfClass:UIView.class] ? rawHost : reference.superview;
     BOOL changed=NO;
     if (host && button.superview!=host) { [button removeFromSuperview];[host addSubview:button];changed=YES; }
-    if (CGRectGetWidth(button.bounds)!=44 || CGRectGetHeight(button.bounds)!=44) {
-        button.bounds=CGRectMake(0,0,44,44);changed=YES;
+    auto size=dnvot::nativeControlSize(CGRectGetWidth(reference.bounds),CGRectGetHeight(reference.bounds));
+    if (fabs(CGRectGetWidth(button.bounds)-size.width)>0.01 || fabs(CGRectGetHeight(button.bounds)-size.height)>0.01) {
+        button.bounds=CGRectMake(0,0,size.width,size.height);changed=YES;
+    }
+    if ([button isKindOfClass:DNVOTPlayerButton.class]) {
+        UIView *glyph=reference;
+        if ([reference isKindOfClass:UIButton.class]) {
+            UIImageView *image=((UIButton *)reference).imageView;
+            if (image.image && !image.hidden && !CGRectIsEmpty(image.bounds)) glyph=image;
+        }
+        CGFloat target=glyph ? CGRectGetMidY([glyph convertRect:glyph.bounds toView:button]) : CGRectGetMidY(button.bounds);
+        ((DNVOTPlayerButton *)button).glyphOffsetY=dnvot::glyphOffset(target,CGRectGetMidY(button.bounds));
     }
     BOOL hidden=button.hidden;
     [DNVOTController.shared updateControlsButton:button];
@@ -183,6 +188,9 @@ NSString *DNVOTNativeDiagnostics(void) {
         CGRect visible=button.window ? [button convertRect:button.bounds toView:button.window] : CGRectZero;
         NSString *visibility=owner && owner->visibility.known ? (owner->visibility.shown ? @"top-visible" : @"top-hidden") : @"reference fallback";
         [report appendFormat:@"\nButton %lu: frame=%@ bounds=%@ parent=%@ alpha=%.2f effective=%.2f hidden=%@ window=%@ reference=%@ screen=%@ visibility=%@",(unsigned long)++index,NSStringFromCGRect(button.frame),NSStringFromCGRect(button.bounds),NSStringFromClass(button.superview.class),button.alpha,effective,hidden ? @"YES" : @"NO",button.window ? @"YES" : @"NO",owner.reference ?: @"—",NSStringFromCGRect(visible),visibility];
+        UIView *reference=DNReference(owner.overlay,nil);
+        CGRect referenceScreen=reference.window ? [reference convertRect:reference.bounds toView:reference.window] : CGRectZero;
+        [report appendFormat:@"\nReference bounds=%@ screen=%@ glyph-offset-y=%.2f",NSStringFromCGRect(reference.bounds),NSStringFromCGRect(referenceScreen),[button isKindOfClass:DNVOTPlayerButton.class] ? ((DNVOTPlayerButton *)button).glyphOffsetY : 0];
     }
     return report;
 }
@@ -194,7 +202,18 @@ void DNVOTInstallNativeUI(void) {
     DNUIHooks+=DNVOTHook(NSClassFromString(@"YTSettingsSectionItemManager"),@"updateSectionForCategory:withEntry:",'v',"Q@",^id(IMP original,SEL sel){return ^(id obj,NSUInteger category,id entry){if (category==DNCategory) {@try{DNBuildSettings(obj);}@catch(NSException *e){NSLog(@"[DNVOT] settings adapter: %@",e.name);}return;}((void(*)(id,SEL,NSUInteger,id))original)(obj,sel,category,entry);};});
     Class overlay=NSClassFromString(@"YTMainAppControlsOverlayView");
     for (NSString *getter in @[@"topControls",@"topButtonControls"]) {
-        DNUIHooks+=DNVOTHook(overlay,getter,'@',"",^id(IMP original,SEL sel){return ^id(id obj){id raw=((id(*)(id,SEL))original)(obj,sel);if (!NSThread.isMainThread || ![raw isKindOfClass:NSArray.class]) return raw;@try{UIButton *button=DNControlsButton(obj);NSMutableArray *list=[raw mutableCopy];if (button && ![list containsObject:button]) [list insertObject:button atIndex:0];return list;}@catch(__unused NSException *e){return raw;}};});
+        DNUIHooks+=DNVOTHook(overlay,getter,'@',"",^id(IMP original,SEL sel){return ^id(id obj){id raw=((id(*)(id,SEL))original)(obj,sel);if (!NSThread.isMainThread || ![raw isKindOfClass:NSArray.class]) return raw;@try{
+            UIButton *button=DNControlsButton(obj);NSMutableArray *list=[raw mutableCopy];
+            if (button && ![list containsObject:button]) {
+                NSUInteger index=NSNotFound;
+                for (NSString *name in @[@"closedCaptionsOrSubtitlesButton",@"playbackRouteButton",@"overflowButton"]) {
+                    id neighbour=DNObject(obj,name);if (!neighbour) continue;
+                    index=[list indexOfObjectIdenticalTo:neighbour];if (index!=NSNotFound) break;
+                }
+                [list insertObject:button atIndex:index==NSNotFound ? 0 : index];
+            }
+            return list;
+        }@catch(__unused NSException *e){return raw;}};});
     }
     DNUIHooks+=DNVOTHook(overlay,@"layoutSubviews",'v',"",^id(IMP original,SEL sel){return ^(id obj){
         @try { DNControlsButton(obj);DNRefreshButton(obj,NO); } @catch (__unused NSException *e) {}

@@ -29,3 +29,8 @@ cache cleanup и нативные переходы/активации/reload п�
 контекст автопредпросмотра/Shorts (один раз на объект). Поле `visibility`
 в диагностике кнопки показывает `top-visible`, `top-hidden` или `reference fallback`.
 Это сигнал верхнего ряда controls, отдельно от effective alpha всей иерархии.
+
+С 0.4.2-test.1: в sample добавлены preparation (none/service/download),
+download_fraction (-1 при неизвестном размере) и service_eta_seconds (-1 при
+неизвестной оценке). ETA относится к последнему ответу сервера, не является
+гарантированным обратным отсчётом или процентом готовности.

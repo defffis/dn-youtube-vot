@@ -6,6 +6,7 @@
 @property(nonatomic,copy) void (^status)(NSString *);
 @property(nonatomic,copy) void (^audioReady)(NSURL *, BOOL partial);
 @property(nonatomic,copy) void (^failed)(NSString *);
+@property(nonatomic,readonly) double serverRemainingTime; // -1 when no usable estimate
 - (void)startVideo:(NSString *)videoID duration:(double)duration from:(NSString *)from to:(NSString *)to sourceAudio:(NSURL *)audioURL itag:(NSInteger)itag;
 - (void)cancel;
 - (NSString *)diagnostics;

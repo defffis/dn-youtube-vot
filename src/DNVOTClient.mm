@@ -3,6 +3,7 @@
 #import "FlightRecorder.h"
 #import <CommonCrypto/CommonHMAC.h>
 #include "VOTWire.hpp"
+#include "PreparationState.hpp"
 #include <algorithm>
 
 static NSString *const DNComponent = @"26.10.0.1796";
@@ -101,6 +102,7 @@ static NSString *DNSign(NSData *data) {
 @property(nonatomic) BOOL legacyWorker;
 @property(nonatomic,strong) NSMutableArray<NSString *> *trace;
 @property(nonatomic,copy) NSString *sourceFailure;
+@property(nonatomic,readwrite) double serverRemainingTime;
 @end
 @interface DNVOTNoRedirect : NSObject <NSURLSessionTaskDelegate>
 @end
@@ -116,11 +118,13 @@ static NSString *DNSign(NSData *data) {
         self.session = [NSURLSession sessionWithConfiguration:config delegate:[DNVOTNoRedirect new] delegateQueue:nil];
         self.tasks = [NSMutableSet set];
         self.trace = [NSMutableArray new];
+        self.serverRemainingTime=-1;
     }
     return self;
 }
 - (void)cancel {
     self.generation++;
+    self.serverRemainingTime=-1;
     self.apiToken = nil;
     for (NSURLSessionTask *task in self.tasks) [task cancel];
     [self.tasks removeAllObjects];
@@ -128,7 +132,7 @@ static NSString *DNSign(NSData *data) {
 }
 - (void)traceEvent:(NSString *)event { [DNFlightRecorder.shared event:@"vot_network" fields:@{@"summary":event}]; [self.trace addObject:event];if (self.trace.count>14) [self.trace removeObjectAtIndex:0]; }
 - (NSString *)diagnostics {
-    return [NSString stringWithFormat:@"Transport: %@\nServer: %@\nLively requested: %@\nSource URL available: %@\nSource itag: %ld\nSource failure: %@\nNetwork trace (last requested video):\n%@",self.transport ?: @"—",self.host ?: @"—",self.lively ? @"YES" : @"NO",self.sourceURL ? @"YES" : @"NO",(long)self.itag,self.sourceFailure ?: @"—",[[self.trace componentsJoinedByString:@"\n"] stringByAppendingFormat:@"\nNetwork trace video: %@\nProxy mode: %ld\nWorker protocol: %@\nSource media proxy: %@",self.videoURL.lastPathComponent ?: @"—",(long)DNVOTPreferences.shared.proxyMode,self.legacyWorker ? @"legacy JSON" : @"modern X-VOT-Headers",DNVOTPreferences.shared.mediaProxyURL.length ? @"configured" : @"off"]];
+    return [NSString stringWithFormat:@"Transport: %@\nServer: %@\nLively requested: %@\nSource URL available: %@\nSource itag: %ld\nSource failure: %@\nNetwork trace (last requested video):\n%@",self.transport ?: @"—",self.host ?: @"—",self.lively ? @"YES" : @"NO",self.sourceURL ? @"YES" : @"NO",(long)self.itag,self.sourceFailure ?: @"—",[[self.trace componentsJoinedByString:@"\n"] stringByAppendingFormat:@"\nNetwork trace video: %@\nProxy mode: %ld\nWorker protocol: %@\nSource media proxy: %@\nService ETA: %@",self.videoURL.lastPathComponent ?: @"—",(long)DNVOTPreferences.shared.proxyMode,self.legacyWorker ? @"legacy JSON" : @"modern X-VOT-Headers",DNVOTPreferences.shared.mediaProxyURL.length ? @"configured" : @"off",self.serverRemainingTime>0 ? [NSString stringWithFormat:@"%.0f s (approximate; last server response)",self.serverRemainingTime] : @"unknown"]];
 }
 - (void)request:(NSString *)path body:(NSData *)body signedRequest:(BOOL)signedRequest method:(NSString *)method json:(BOOL)json completion:(void (^)(NSData *, NSString *))completion {
     NSUInteger generation = self.generation;
@@ -243,21 +247,23 @@ static NSString *DNSign(NSData *data) {
             try {
                 auto fields = dnvot::parse((const uint8_t *)data.bytes, data.length);
                 NSInteger status = dnvot::value(fields, 4);
-                [self traceEvent:[NSString stringWithFormat:@"VOT status=%ld retry=%llu",(long)status,(unsigned long long)dnvot::value(fields,12)]];
-                double remaining = std::min(1200.0, (double)dnvot::value(fields, 5, 10));
+                self.serverRemainingTime=(status==2 || status==3 || status==5) ? dnvot::serviceRemainingSeconds(fields) : -1;
+                NSString *estimate=self.serverRemainingTime>0 ? [NSString stringWithFormat:@"%.0f s (approximate)",self.serverRemainingTime] : @"unknown";
+                [self traceEvent:[NSString stringWithFormat:@"VOT status=%ld retry=%llu eta=%@",(long)status,(unsigned long long)dnvot::value(fields,12),estimate]];
+                double remaining=self.serverRemainingTime>0 ? self.serverRemainingTime : 10;
                 NSString *translationID = DNText(dnvot::text(fields, 7));
                 if (status == 1 || status == 5) {
                     NSString *urlText = DNText(dnvot::text(fields, 1));
                     NSURL *url = [NSURL URLWithString:urlText];
                     if (![url.scheme.lowercaseString isEqualToString:@"https"] || !url.host.length || url.user.length || url.password.length) throw std::runtime_error("Invalid audio URL");
+                    if (self.status) self.status(status == 5 ? @"Доступна часть перевода; остальная дорожка готовится…" : @"Перевод готов");
                     if (![self.lastAudio isEqualToString:urlText]) {
                         self.lastAudio = urlText;
                         if (self.audioReady) self.audioReady(url, status == 5);
                     }
-                    if (self.status) self.status(status == 5 ? @"Доступна часть перевода; остальная дорожка готовится…" : @"Перевод готов");
                     if (status == 5) [self later:remaining];
                 } else if (status == 2 || status == 3) {
-                    if (self.status) self.status([NSString stringWithFormat:@"Перевод готовится. Оценка сервиса: %.0f с", remaining]);
+                    if (self.status) self.status(self.serverRemainingTime>0 ? [NSString stringWithFormat:@"Перевод готовится. Примерная оценка сервиса: %.0f с",self.serverRemainingTime] : @"Перевод готовится. Сервис не сообщил оставшееся время.");
                     [self later:remaining];
                 } else if (status == 6) {
                     if (!translationID.length) throw std::runtime_error("Missing translation ID");

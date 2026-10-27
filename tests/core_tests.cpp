@@ -7,6 +7,8 @@
 #include "../src/CachePolicy.hpp"
 #include "../src/AutoStartGate.hpp"
 #include "../src/PlayerPolicy.hpp"
+#include "../src/PreparationState.hpp"
+#include "../src/ControlGeometry.hpp"
 #include <cassert>
 #include <iostream>
 #include <limits>
@@ -19,6 +21,39 @@ static void reject(const dnvot::Bytes &b) {
 }
 int main(int argc, char **argv) {
     using namespace dnvot;
+    auto nativeSize=nativeControlSize(24,32);
+    assert(nativeSize.width==24 && nativeSize.height==32); // avoid reserving 44pt in a 24pt icon row
+    assert(nativeControlSize(44,44).width==44);
+    assert(nativeControlSize(NAN,32).width==32);
+    assert(nativeControlSize(200,32).width==32);
+    assert(nativeControlSize(0,0).height==32);
+    assert(glyphOffset(18,16)==2 && glyphOffset(16,18)==-2);
+    assert(glyphOffset(100,16)==0 && glyphOffset(-100,16)==0);
+    assert(glyphOffset(NAN,16)==0);
+    auto eta=[](uint64_t seconds) {
+        Bytes response;integer(response,5,seconds);
+        return serviceRemainingSeconds(parse(response.data(),response.size()));
+    };
+    assert(serviceRemainingSeconds(Fields{})==-1); // absent is not the poll interval
+    assert(eta(45)==45 && eta(1)==1 && eta(86400)==86400);
+    assert(eta(0)==-1 && eta(86401)==-1 && eta(UINT64_MAX)==-1);
+    assert(eta(0xffffffffULL)==-1); // int32 negative sentinel, not a huge ETA
+    Bytes invalidETA;string(invalidETA,5,"45");
+    assert(serviceRemainingSeconds(parse(invalidETA.data(),invalidETA.size()))==-1);
+    auto preparation=preparationState(false,false,true,50,100);
+    assert(preparation.phase==PreparationPhase::none && preparation.fraction<0);
+    preparation=preparationState(true,false,false,50,100);
+    assert(preparation.phase==PreparationPhase::service && preparation.fraction<0);
+    preparation=preparationState(true,false,true,25,100);
+    assert(preparation.phase==PreparationPhase::download && preparation.fraction==0.25);
+    assert(preparationState(true,false,true,0,0).fraction<0);
+    assert(preparationState(true,false,true,10,-1).fraction<0);
+    assert(preparationState(true,false,true,-1,100).fraction<0);
+    assert(preparationState(true,false,true,100,100).fraction==0.99);
+    assert(preparationState(true,false,true,200,100).fraction==0.99);
+    assert(preparationState(true,false,true,INT64_MAX,1).fraction==0.99);
+    assert(preparationState(true,true,true,10,100).phase==PreparationPhase::none);
+    assert(preparationState(true,false,false,100,100).fraction<0); // new request, no stale ring
     assert(excludedPlaybackClass("YTInlineMutedPlaybackWatchViewController"));
     assert(excludedPlaybackClass("YTInlineMutedPlaybackPlayerOverlayViewController"));
     assert(excludedPlaybackClass("YTShortsPlayerViewController"));
@@ -98,6 +133,11 @@ int main(int argc, char **argv) {
     if (argc > 2) {
         Bytes b;
         std::string op = argv[1];
+        if (op == "eta-response") {
+            std::string hex=argv[2];assert(hex.size()%2==0);
+            for (size_t i=0;i<hex.size();i+=2) b.push_back(static_cast<uint8_t>(std::stoul(hex.substr(i,2),nullptr,16)));
+            std::cout << serviceRemainingSeconds(parse(b.data(),b.size())) << '\n';return 0;
+        }
         if (op == "session") b = session(argv[2]);
         else if (op == "translation") b = translation(std::string("https://youtu.be/") + argv[2], argc > 3 ? std::stod(argv[3]) : 19, "en", "ru", argc > 4 ? std::string(argv[4]) != "0" : true, false);
         else if (op == "lively") b = translation(std::string("https://youtu.be/") + argv[2],19,"en","ru",true,false,"",true);
@@ -197,5 +237,5 @@ int main(int argc, char **argv) {
     d = sync(10, NAN, 0, 1, true, false, true, 100); assert(!d.audible);
     d = sync(10, 10, 0, INFINITY, true, false, true, 100); assert(!d.audible);
     d = sync(10, 10, 0, 0, true, false, true, 100); assert(!d.audible);
-    std::cout << "PASS: preview/Shorts scope and top-controls visibility; sustained automatic-start gate / initial stalls / video switching / seeks, absolute cache TTL/boundary/cache hits/active-file protection, language normalization, auto exclusions/unknown timeout, proxy modes/prefix/query preservation, empty ID equality, protobuf bounds, session, translation/help/audio fields, binary payload, lively voice, control idle/wait/armed/playing/disable, measured clock and stale pause recovery, local transport 400-step playback/seek, bounded restart, 0.5x/2x boundaries, pause, seek, rate, ads, buffering, partial coverage, offset, invalid clocks\n";
+    std::cout << "PASS: optional/signed server ETA and preparation/download phases; preview/Shorts scope and top-controls visibility; sustained automatic-start gate / initial stalls / video switching / seeks, absolute cache TTL/boundary/cache hits/active-file protection, language normalization, auto exclusions/unknown timeout, proxy modes/prefix/query preservation, empty ID equality, protobuf bounds, session, translation/help/audio fields, binary payload, lively voice, control idle/wait/armed/playing/disable, measured clock and stale pause recovery, local transport 400-step playback/seek, bounded restart, 0.5x/2x boundaries, pause, seek, rate, ads, buffering, partial coverage, offset, invalid clocks\n";
 }
