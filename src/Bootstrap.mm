@@ -37,7 +37,7 @@ NSString *DNVOTBootstrapDiagnostics(void) {
         DNBootState, (unsigned long)DNBootPasses, NSBundle.mainBundle.bundleIdentifier,
         [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleExecutable"],
         NSClassFromString(@"YTPlayerViewController") ? @"YES" : @"NO",
-        NSStringFromClass(DNActiveWindow().rootViewController.class), @"DNYouTubeVOT 0.4.2-test.1"];
+        NSStringFromClass(DNActiveWindow().rootViewController.class), @"DNYouTubeVOT 0.4.2"];
 }
 
 static void DNVisit(UIViewController *vc, DNVOTBootstrap *bootstrap, NSMutableSet *visited, NSUInteger depth, NSUInteger *budget) {

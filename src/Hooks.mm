@@ -109,5 +109,5 @@ void DNVOTInstallHooks(void) {
     count += DNHook(NSClassFromString(@"YTSingleVideoController"), @"reloadPlayerWithContext:", 'v', "@", ^id(IMP original,SEL sel) {
         return ^(id obj,id context) { DNPlayerEvent(@"native_player_reload",obj,context);((void(*)(id,SEL,id))original)(obj,sel,context); };
     });
-    if (count) NSLog(@"[DNVOT] 0.4.2-test.1 installed %lu native hooks", (unsigned long)count);
+    if (count) NSLog(@"[DNVOT] 0.4.2 installed %lu native hooks", (unsigned long)count);
 }
